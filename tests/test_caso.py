@@ -218,3 +218,11 @@ def test_informe_html_completo_y_con_texto_externo_escapado():
     assert "Distribución espacial" not in sin_extras and "Contraste con la literatura" not in sin_extras
     anual = caso.interrogar((_serie(-0.08, ruido=0.6, ciclo=0.0, semilla=5) - 14).clip(lower=0).round(2).where(lambda s: s.index.month.isin([12, 1, 2, 3]), 0.0), POR_CODIGO["FROST_DAYS"])
     assert "Promedio anual" in informe.informe_html(anual, "X", 0.0, 0.0)
+
+
+def test_recorrido_animado_generado_y_completo():
+    from expediente import demo
+    html = demo.RUTA.read_text(encoding="utf-8")
+    assert html.count('<section class="escena') == 11 and "__DATOS__" not in html and "const AUTO = true;" in html
+    datos = {"sitio": "X", "variables": 27, "exploracion": [], "pruebas": []}
+    assert '"sitio": "X"' in demo.demo_html(datos) and "const AUTO = false;" in demo.demo_html(datos, reproducir_sola=False)

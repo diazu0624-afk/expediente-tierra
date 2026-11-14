@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as componentes
 
 from expediente import caso, datos, datos_gee, graficas, informe, region, veredicto
 from expediente.variables import CATALOGO, CATEGORIAS, METODOS, POR_CODIGO, REFERENCIAS, Variable
@@ -319,7 +320,16 @@ def pagina_inicio() -> None:
         equipo="Equipo C15H25N3O",
     )
 
-    seccion(1, "Empezar un análisis")
+    recorrido = RAIZ / "static" / "demo.html"
+    if recorrido.exists():
+        seccion(1, "Recorrido de la herramienta")
+        st.caption("Minuto y medio para ver el flujo completo, con los datos reales de Nueva Delhi: de empezar "
+                   "un análisis a descargar el informe. Usa «Reproducir» para iniciarlo.")
+        # La misma animación se reproduce sola cuando se abre el archivo directamente (para grabarla).
+        componentes.html(recorrido.read_text(encoding="utf-8").replace("const AUTO = true;", "const AUTO = false;"),
+                         height=660)
+
+    seccion(2, "Empezar un análisis")
     with st.container(border=True):
         uno, dos, tres = st.columns(3)
         tema = uno.radio("Tema de interés", list(TEMAS))
@@ -337,7 +347,7 @@ def pagina_inicio() -> None:
             st.session_state["guiado"] = {"sitio": sitio, "tema": tema, "hipotesis": hipotesis}
             st.switch_page(PAGINAS["analisis"])
 
-    seccion(2, "Método")
+    seccion(3, "Método")
     pasos = [
         ("Exploración de variables", "Se calcula la tendencia de todas las variables del sitio "
          "y se ordenan por su magnitud estandarizada."),
@@ -352,7 +362,7 @@ def pagina_inicio() -> None:
         columna.html(f'<div class="et-paso"><div class="n">PASO {k}</div>'
                      f'<div class="t">{titulo}</div><p>{texto}</p></div>')
 
-    seccion(3, "Validación del método")
+    seccion(4, "Validación del método")
     st.html(
         '<p class="et-nota"><b>Cómo se obtuvieron estas cifras.</b> Se generaron series sintéticas de 45 años '
         "de datos mensuales que, por construcción, no tienen ninguna tendencia, pero sí autocorrelación "
@@ -378,7 +388,7 @@ def pagina_inicio() -> None:
     st.caption(f"Simulación de Monte Carlo con {VALIDACION['series']} series por escenario. El código "
                "está en la carpeta validacion/ del repositorio.")
 
-    seccion(4, "Datos")
+    seccion(5, "Datos")
     satelite = sum(v.origen == "gee" for v in CATALOGO)
     a, b, c = st.columns(3)
     cifra(a, "Variables", f"{len(CATALOGO)}", "series mensuales, de 1981 a la fecha")
@@ -387,7 +397,7 @@ def pagina_inicio() -> None:
     st.page_link(PAGINAS["variables"], label="Definiciones y referencias de las variables",
                  icon=":material/arrow_forward:")
 
-    seccion(5, "Comparación de dos lugares")
+    seccion(6, "Comparación de dos lugares")
     st.markdown("Un mismo proceso puede producir tendencias opuestas en regiones distintas. La "
                 "comparación coloca la misma variable de dos lugares sobre un mismo eje.")
     st.page_link(PAGINAS["comparacion"], label="Ir a la comparación", icon=":material/arrow_forward:")

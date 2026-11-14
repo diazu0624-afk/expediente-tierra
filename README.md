@@ -60,6 +60,18 @@ export EXPEDIENTE_EE_PROYECTO=el-id-de-tu-proyecto   # si no es el del equipo
 
 Sin esa sesión la app sigue funcionando y avisa que los satélites no están disponibles.
 
+### Recorrido animado y video
+
+`static/demo.html` es una animación de minuto y medio que recorre la herramienta con los datos
+reales de Nueva Delhi. Aparece incrustada en la página de inicio y también sirve para grabar
+el video de presentación:
+
+1. Abre `static/demo.html?grabar=1` en el navegador a pantalla completa (sin controles).
+2. Graba la pantalla (en Mac: `Cmd + Shift + 5`) y recarga la página para que empiece.
+
+Para regenerarla tras cambiar datos o textos: `.venv/bin/python -m expediente.demo`. Teclas
+al verla sin `?grabar=1`: espacio (pausa), flechas (escena anterior o siguiente).
+
 ### Enlaces directos
 
 | Ruta | Qué abre |
@@ -141,7 +153,8 @@ expediente-tierra/
 ├── .streamlit/
 │   └── config.toml             Tema: colores, tipografías, barra de herramientas
 ├── static/
-│   └── favicon.png             Ícono de la pestaña
+│   ├── favicon.png             Ícono de la pestaña
+│   └── demo.html               Recorrido animado (lo genera expediente/demo.py)
 ├── expediente/                 Lógica de la aplicación (sin Streamlit)
 │   ├── __init__.py
 │   ├── variables.py            Catálogo de 27 variables y 27 referencias con DOI
@@ -152,7 +165,8 @@ expediente-tierra/
 │   ├── region.py               Mapa de tendencias por celda y promedio regional
 │   ├── veredicto.py            Redacción del resultado, ficha técnica y avisos
 │   ├── graficas.py             Figuras interactivas (Plotly)
-│   └── informe.py              Informe descargable en HTML con gráficas SVG
+│   ├── informe.py              Informe descargable en HTML con gráficas SVG
+│   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
 │   └── test_caso.py            19 pruebas del análisis, la región y el informe
