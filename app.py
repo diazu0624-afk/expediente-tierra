@@ -36,6 +36,19 @@ CASOS = [
 ]
 
 
+# Careos sugeridos: (título, índice del caso A, índice del caso B, variable, pista).
+CAREOS = [
+    ("Delhi contra Pekín: partículas en el aire", 1, 2, "AOD_55",
+     "Dos capitales que crecieron quemando carbón. ¿Su aire va en la misma dirección?"),
+    ("Monterrey contra el Ártico: temperatura", 0, 3, "T2M",
+     "El planeta se calienta, pero ¿al mismo ritmo en todas partes?"),
+    ("Delhi contra el Sahel: agua almacenada", 1, 4, "GRACE_AGUA",
+     "Dos regiones secas donde vive muchísima gente. ¿Qué pasa con el agua bajo sus pies?"),
+    ("Pekín contra Monterrey: lluvia medida desde satélite", 2, 0, "GPM_LLUVIA",
+     "Dos ciudades con escasez de agua. ¿En alguna está cambiando la lluvia?"),
+]
+
+
 def _parametro(nombre: str) -> str:
     """Parámetro de la URL (p. ej. ?caso=2&var=AOD_55), para compartir un caso ya abierto."""
     return st.query_params.get(nombre, "")
@@ -295,6 +308,110 @@ def paso_veredicto(r: caso.Interrogatorio, lugar: dict) -> None:
     )
 
 
+def _lugar_del_careo(barra, etiqueta: str, indice: int) -> dict | None:
+    """Selector de un lugar para el careo: un caso de demostración o una búsqueda libre."""
+    opciones = [c["nombre"] for c in CASOS] + ["Buscar otro lugar..."]
+    elegido = barra.selectbox(etiqueta, opciones, index=indice)
+    if elegido != opciones[-1]:
+        return CASOS[opciones.index(elegido)]
+    texto = barra.text_input(f"{etiqueta}: ciudad, región o país", key=f"busqueda_{etiqueta}")
+    if not texto.strip():
+        return None
+    try:
+        lugares = buscar(texto.strip())
+    except datos.ErrorDeDatos as error:
+        barra.error(str(error))
+        return None
+    if not lugares:
+        barra.warning("No encontré ese lugar. Prueba con otro nombre.")
+        return None
+    return barra.selectbox(f"{etiqueta}: ¿cuál de estos?", lugares, format_func=lambda l: l["nombre"])
+
+
+def pagina_careo() -> None:
+    """Dos lugares, una variable: ¿van en la misma dirección?"""
+    barra = st.sidebar
+    titulos = [c[0] for c in CAREOS] + ["Armar mi propio careo"]
+    inicial = int(_parametro("careo")) if _parametro("careo").isdigit() else 0
+    elegido = barra.selectbox("Careo", titulos, index=min(inicial, len(titulos) - 1))
+    if elegido != titulos[-1]:
+        _, i, j, codigo, pista = CAREOS[titulos.index(elegido)]
+        lugar_a, lugar_b = CASOS[i], CASOS[j]
+        barra.markdown(f"**La pista.** {pista}")
+    else:
+        lugar_a = _lugar_del_careo(barra, "Lugar A", 0)
+        lugar_b = _lugar_del_careo(barra, "Lugar B", 3)
+        if lugar_a is None or lugar_b is None:
+            st.info("Elige los dos lugares en la barra lateral.")
+            return
+        try:
+            with st.spinner("Pidiendo los datos a la NASA..."):
+                validos = [cargar_sospechosos(l["lat"], l["lon"]).dropna(subset=["estandarizada"])["codigo"]
+                           for l in (lugar_a, lugar_b)]
+        except datos.ErrorDeDatos as error:
+            st.error(f"No se pudieron obtener los datos. {error}")
+            return
+        comunes = [v.codigo for v in CATALOGO if v.codigo in set(validos[0]) & set(validos[1])]
+        if not comunes:
+            st.warning("Estos dos lugares no tienen ninguna variable medible en común.")
+            return
+        codigo = barra.selectbox("Variable", comunes, format_func=lambda c: POR_CODIGO[c].nombre)
+    if lugar_a["nombre"] == lugar_b["nombre"]:
+        st.info("Elige dos lugares distintos para el careo.")
+        return
+
+    v = POR_CODIGO[codigo]
+    a_nombre, b_nombre = lugar_a["nombre"], lugar_b["nombre"]
+    st.subheader(f"Careo: {v.nombre}")
+    st.markdown(f"**{a_nombre}** frente a **{b_nombre}**.  \n{v.definicion} Fuente: {v.fuente}.")
+    alcance = st.radio("¿A quién interrogamos en cada lugar?",
+                       ["El punto", "El promedio de la región (8° × 8°)"], horizontal=True)
+    try:
+        with st.spinner("Interrogando a los dos lugares..."):
+            if alcance == "El punto":
+                a = cargar_interrogatorio(lugar_a["lat"], lugar_a["lon"], codigo)
+                b = cargar_interrogatorio(lugar_b["lat"], lugar_b["lon"], codigo)
+            else:
+                a = cargar_interrogatorio_regional(lugar_a["lat"], lugar_a["lon"], codigo, 8)
+                b = cargar_interrogatorio_regional(lugar_b["lat"], lugar_b["lon"], codigo, 8)
+    except (caso.CasoImposible, datos.ErrorDeDatos, KeyError) as error:
+        st.warning(f"No se puede hacer este careo: en uno de los lugares la variable no se puede medir. {error}")
+        return
+
+    with st.container(border=True):
+        st.markdown(f"### {veredicto.comparar(a, b, a_nombre, b_nombre)}")
+    st.plotly_chart(graficas.careo(a, b, a_nombre, b_nombre), theme=None, width="stretch",
+                    config={"displayModeBar": False})
+    st.caption("La curva es el promedio de 12 meses, ya sin el vaivén de las estaciones; la recta es "
+               "la tendencia. Cada lugar se compara con su propio valor normal, así que las dos "
+               "curvas parten de cero aunque un lugar sea mucho más caliente o lluvioso que el otro.")
+
+    mapas = []
+    for lugar in (lugar_a, lugar_b):
+        try:
+            mapas.append(cargar_mapa(lugar["lat"], lugar["lon"], codigo, 8))
+        except datos.ErrorDeDatos:
+            mapas.append(pd.DataFrame())
+    # Los dos mapas comparten la escala de color: el mismo tono significa el mismo cambio.
+    tope = max((float(m["pendiente_decada"].abs().max()) for m in mapas if not m.empty), default=None)
+    for columna, r, lugar, mapa in zip(st.columns(2), (a, b), (lugar_a, lugar_b), mapas):
+        with columna.container(border=True):
+            st.markdown(f"**{lugar['nombre']}**")
+            izq, der = st.columns(2)
+            izq.metric("Cambio por década", f"{caso.numero(r.pendiente_decada, signo=True)} {v.unidad}")
+            der.metric("Evidencia", f"{caso.NIVELES_CORTOS[r.nivel]} ({r.aprobadas} de {caso.N_PRUEBAS})")
+            st.caption(veredicto.redactar(r).cuanto)
+            if not mapa.empty:
+                resumen = region.resumen(mapa)
+                st.plotly_chart(graficas.mapa(mapa, v.unidad, lugar["lat"], lugar["lon"], tope=tope, alejar=0.4),
+                                theme=None, width="stretch", config={"displayModeBar": False},
+                                key=f"mapa_{lugar['nombre']}")
+                st.caption(f"En la región: sube de forma significativa en {resumen['sube']:.0f} % "
+                           f"de las celdas y baja en {resumen['baja']:.0f} %.")
+    st.caption("Para ver las cinco pruebas de cada lugar, ábrelo en «Investigar un lugar».")
+    metodo()
+
+
 def metodo() -> None:
     with st.expander("Cómo trabaja el detective (método y validación)"):
         st.markdown(
@@ -332,6 +449,11 @@ def main() -> None:
     st.title("Expediente Tierra")
     st.markdown("Elige un lugar del planeta. Descubre **qué** está cambiando ahí, **cuánto**, "
                 "y si la evidencia aguanta un interrogatorio.")
+    modo = st.sidebar.radio("¿Qué quieres hacer?", ["Investigar un lugar", "Careo: comparar dos lugares"],
+                            index=1 if _parametro("careo") else 0)
+    if modo != "Investigar un lugar":
+        pagina_careo()
+        return
     lugar = elegir_lugar()
     if lugar is None:
         st.info("Escribe un lugar en la barra lateral para abrir un caso.")

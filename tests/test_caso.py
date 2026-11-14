@@ -148,3 +148,18 @@ def test_cubo_de_satelite_recorte_y_punto():
 def test_catalogo_distingue_modelo_y_satelite():
     from expediente.datos_gee import FUENTES
     assert {v.codigo for v in CATALOGO if v.origen == "gee"} == set(FUENTES)
+
+
+def test_careo_distingue_opuestos_ritmos_y_un_solo_cambio():
+    from expediente import veredicto
+    t2m = POR_CODIGO["T2M"]
+    sube = caso.interrogar(_serie(0.05, semilla=1), t2m)
+    sube_rapido = caso.interrogar(_serie(0.15, semilla=2), t2m)
+    baja = caso.interrogar(_serie(-0.05, semilla=3), t2m)
+    quieto = caso.interrogar(_serie(0.0, semilla=3), t2m)
+    assert veredicto.comparar(sube, baja, "A", "B").startswith("Direcciones opuestas: sube en A")
+    ritmo = veredicto.comparar(sube, sube_rapido, "A", "B")
+    assert ritmo.startswith("Misma dirección") and "pero en B lo hace" in ritmo
+    solo = veredicto.comparar(quieto, baja, "A", "B")
+    assert solo.startswith("Solo un lugar cambia: baja en B") and "en A no hay evidencia" in solo
+    assert veredicto.comparar(quieto, quieto, "A", "B").startswith("Ninguno")

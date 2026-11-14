@@ -117,3 +117,26 @@ def expediente_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -
         lineas += ["", "## Cuánto habría que esperar", v.espera]
     lineas += ["", "## Límites de este expediente"] + [f"- {a}" for a in v.advertencias]
     return "\n".join(lineas) + "\n"
+
+
+def comparar(a: Interrogatorio, b: Interrogatorio, nombre_a: str, nombre_b: str) -> str:
+    """Veredicto del careo: ¿la misma variable va en la misma dirección en los dos lugares?"""
+    u = a.variable.unidad
+    firme_a, firme_b = a.nivel in ("solida", "fuerte"), b.nivel in ("solida", "fuerte")
+    rumbo = lambda r: "sube" if r.sube else "baja"
+    ritmo = lambda r: f"{numero(r.pendiente_decada, signo=True)} {u} por década"
+    if firme_a and firme_b and a.sube != b.sube:
+        return (f"Direcciones opuestas: {rumbo(a)} en {nombre_a} ({ritmo(a)}) y {rumbo(b)} en "
+                f"{nombre_b} ({ritmo(b)}), con evidencia firme en los dos.")
+    if firme_a and firme_b:
+        rapido, lento = (a, b) if abs(a.pendiente_decada) >= abs(b.pendiente_decada) else (b, a)
+        nombre_rapido = nombre_a if rapido is a else nombre_b
+        veces = abs(rapido.pendiente_decada) / abs(lento.pendiente_decada)
+        return (f"Misma dirección, distinto ritmo: {rumbo(a)} en los dos lugares, pero en "
+                f"{nombre_rapido} lo hace {veces:.1f} veces más rápido ({ritmo(a)} en {nombre_a}, "
+                f"{ritmo(b)} en {nombre_b}).")
+    if firme_a or firme_b:
+        firme, nombre_firme, nombre_otro = (a, nombre_a, nombre_b) if firme_a else (b, nombre_b, nombre_a)
+        return (f"Solo un lugar cambia: {rumbo(firme)} en {nombre_firme} ({ritmo(firme)}), mientras "
+                f"que en {nombre_otro} no hay evidencia suficiente de una tendencia.")
+    return f"Ninguno de los dos lugares muestra evidencia firme de una tendencia."

@@ -19,6 +19,8 @@ EJE = "#c3c2b7"
 ROJO, ROJO_CLARO = "#e34948", "#f3b3b2"
 AZUL, AZUL_CLARO = "#2a78d6", "#9ec5f4"
 DIVERGENTE = [[0, "#184f95"], [0.25, "#6da7ec"], [0.5, "#f0efec"], [0.75, "#ee8f8e"], [1, "#b12b2b"]]
+# Identidad de los dos lugares de un careo (no significan dirección).
+LUGAR_A, LUGAR_B = "#2a78d6", "#eb6834"
 FUENTE = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
 
@@ -167,8 +169,13 @@ def triangulo(r: Interrogatorio) -> go.Figure:
     return fig
 
 
-def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float) -> go.Figure:
-    """Mapa de la región: el color de cada celda es su tendencia; el punto marca las significativas."""
+def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
+         tope: float | None = None, alejar: float = 0.0) -> go.Figure:
+    """Mapa de la región: el color de cada celda es su tendencia; el punto marca las significativas.
+
+    `tope` fija el extremo de la escala de color (para comparar dos mapas con la misma
+    vara) y `alejar` reduce el acercamiento cuando el mapa se dibuja en una columna angosta.
+    """
     lats, lons = np.sort(tabla["lat"].unique()), np.sort(tabla["lon"].unique())
     alto_celda = float(np.diff(lats).min()) if lats.size > 1 else 0.5
     ancho_celda = float(np.diff(lons).min()) if lons.size > 1 else 0.625
@@ -179,7 +186,7 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float) -
             [f.lon + ancho_celda / 2, f.lat + alto_celda / 2], [f.lon - ancho_celda / 2, f.lat + alto_celda / 2],
             [f.lon - ancho_celda / 2, f.lat - alto_celda / 2]]]},
     } for i, f in enumerate(tabla.itertuples())]
-    tope = float(tabla["pendiente_decada"].abs().max()) or 1.0
+    tope = tope or float(tabla["pendiente_decada"].abs().max()) or 1.0
     estado = np.where(tabla["significativa"], "significativa", "no significativa")
 
     fig = go.Figure()
@@ -204,7 +211,38 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float) -
     alto_grados = (lats.max() - lats.min() + alto_celda) / np.cos(np.radians(float(lats.mean())))
     fig.update_layout(
         map=dict(style="carto-positron", center=dict(lat=float(lats.mean()), lon=float(lons.mean())),
-                 zoom=float(np.log2(360 * 440 / (512 * 1.15 * alto_grados)))),
+                 zoom=float(np.log2(360 * 440 / (512 * 1.15 * alto_grados))) - alejar),
         margin=dict(l=0, r=0, t=36, b=0),
     )
+    return fig
+
+
+def _para_careo(r: Interrogatorio) -> tuple[pd.Index, pd.Series, np.ndarray]:
+    """Fechas, serie suavizada y recta de tendencia, todo como diferencia con lo normal."""
+    if r.resolucion == "mensual":
+        return (r.anomalias.index, r.anomalias.rolling(12, center=True).mean(),
+                r.regresion.intercepto + r.regresion.pendiente * r.t)
+    fechas = pd.to_datetime([f"{anio}-07-01" for anio in r.anual.index])
+    normal = float(r.anual.mean())
+    return fechas, r.anual - normal, r.regresion.intercepto + r.regresion.pendiente * r.t - normal
+
+
+def careo(a: Interrogatorio, b: Interrogatorio, nombre_a: str, nombre_b: str) -> go.Figure:
+    """La misma variable en dos lugares, sobre un mismo eje: curva suavizada y recta de tendencia."""
+    u = a.variable.unidad
+    fig = go.Figure()
+    for r, nombre, color in ((a, nombre_a, LUGAR_A), (b, nombre_b, LUGAR_B)):
+        fechas, suave, recta = _para_careo(r)
+        fig.add_scatter(x=fechas, y=suave, mode="lines", name=nombre, legendgroup=nombre,
+                        line=dict(color=color, width=1.5), opacity=0.55,
+                        hovertemplate=nombre + ", %{x|%b %Y}: %{y:+.3g} " + u + "<extra></extra>")
+        fig.add_scatter(x=fechas, y=recta, mode="lines", legendgroup=nombre, showlegend=False,
+                        line=dict(color=color, width=2.5), hoverinfo="skip")
+        fig.add_annotation(x=fechas[-1], y=float(recta[-1]), xanchor="left", xshift=8, showarrow=False,
+                           text=f"{numero(r.pendiente_decada, signo=True)}<br>por década",
+                           font=dict(color=TINTA_2, size=12), align="left")
+    _base(fig, alto=400)
+    fig.add_hline(y=0, line_color=EJE, line_width=1)
+    fig.update_layout(margin_r=90, legend_traceorder="normal")
+    fig.update_yaxes(title_text=f"Diferencia con lo normal de cada lugar ({u})")
     return fig
