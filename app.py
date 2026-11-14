@@ -49,6 +49,21 @@ CAREOS = [
 ]
 
 
+MODOS = ["Empezar aquí", "Investigar un lugar", "Careo: comparar dos lugares"]
+
+# La guía: lo que le preocupa al usuario -> a qué sospechoso interrogar primero (el primero
+# de la lista que se pueda medir en el lugar). La lista vacía deja al más sospechoso.
+TEMAS = {
+    "El calor": ["T2M"],
+    "La lluvia y el agua": ["GRACE_AGUA", "GPM_LLUVIA", "PRECTOTCORR"],
+    "El aire que respiramos": ["AOD_55"],
+    "Las plantas y los cultivos": ["MODIS_NDVI", "GWETROOT"],
+    "El frío, las heladas y la nieve": ["FROST_DAYS", "SNODP", "T2M_MIN"],
+    "No sé: muéstrame lo que más está cambiando": [],
+}
+APUESTAS = ["Está subiendo", "Está bajando", "No está cambiando"]
+
+
 def _parametro(nombre: str) -> str:
     """Parámetro de la URL (p. ej. ?caso=2&var=AOD_55), para compartir un caso ya abierto."""
     return st.query_params.get(nombre, "")
@@ -151,7 +166,7 @@ def paso_lugar(lugar: dict, tabla_datos: pd.DataFrame) -> None:
     mapa.map(pd.DataFrame({"lat": [lugar["lat"]], "lon": [lugar["lon"]]}), zoom=3, height=220)
 
 
-def paso_sospechosos(sospechosos: pd.DataFrame) -> str | None:
+def paso_sospechosos(sospechosos: pd.DataFrame, preferidas: tuple[str, ...] = ()) -> str | None:
     st.subheader("2 · La rueda de sospechosos")
     validos = sospechosos.dropna(subset=["estandarizada"])
     firmes = int(validos["significativa"].sum())
@@ -186,10 +201,12 @@ def paso_sospechosos(sospechosos: pd.DataFrame) -> str | None:
         return None
     codigos = list(validos["codigo"])
     rumbo = dict(zip(validos["codigo"], validos["estandarizada"]))
+    inicial = next((c for c in (*preferidas, _parametro("var")) if c in codigos), codigos[0])
     return st.selectbox(
         "Elige a tu sospechoso",
         codigos,
-        index=codigos.index(_parametro("var")) if _parametro("var") in codigos else 0,
+        index=codigos.index(inicial),
+        key=f"sospechoso_{inicial}_{len(codigos)}",
         format_func=lambda c: f"{POR_CODIGO[c].nombre} ({'sube' if rumbo[c] > 0 else 'baja'})",
     )
 
@@ -282,7 +299,17 @@ def paso_interrogatorio(r: caso.Interrogatorio) -> None:
                     config={"displayModeBar": False})
 
 
-def paso_veredicto(r: caso.Interrogatorio, lugar: dict) -> None:
+def _resultado_de_apuesta(r: caso.Interrogatorio, apuesta: str) -> str:
+    """Compara lo que el usuario apostó antes de ver los datos con lo que dictan las pruebas."""
+    firme = r.nivel in ("solida", "fuerte")
+    real = APUESTAS[2] if not firme else APUESTAS[0] if r.sube else APUESTAS[1]
+    if apuesta == real:
+        return f"**Tu apuesta: «{apuesta.lower()}».** Los datos te dan la razón."
+    dicen = "no hay evidencia suficiente de un cambio" if not firme else real.lower()
+    return f"**Tu apuesta: «{apuesta.lower()}».** Los datos dicen otra cosa: {dicen}."
+
+
+def paso_veredicto(r: caso.Interrogatorio, lugar: dict, apuesta: str | None = None) -> None:
     st.subheader("5 · El veredicto")
     v = veredicto.redactar(r)
     u = r.variable.unidad
@@ -296,6 +323,8 @@ def paso_veredicto(r: caso.Interrogatorio, lugar: dict) -> None:
         st.markdown(f"**Dónde.** {lugar['nombre']}.  \n**Cuánto.** {v.cuanto}  \n**Qué tan seguro.** {v.evidencia}")
         if v.espera:
             st.markdown(f"**Cuánto habría que esperar.** {v.espera}")
+        if apuesta:
+            st.markdown(_resultado_de_apuesta(r, apuesta))
         with st.expander("Límites de este expediente"):
             for advertencia in v.advertencias:
                 st.markdown(f"- {advertencia}")
@@ -445,16 +474,104 @@ por escenario; los detalles están en la carpeta `validacion/`).
         )
 
 
+def _abrir_caso_guiado(lugar: dict, tema: str, apuesta: str) -> None:
+    st.session_state["guiado"] = {"lugar": lugar, "tema": tema, "apuesta": apuesta}
+    st.session_state["modo"] = MODOS[1]
+
+
+def _ir_a(modo: str) -> None:
+    st.session_state["modo"] = modo
+
+
+def pagina_inicio() -> None:
+    """Portada: qué es esto, tres preguntas para abrir un caso y por qué confiar en el veredicto."""
+    st.markdown("Los satélites y los modelos de la NASA llevan décadas midiendo el planeta. "
+                "Aquí tú eres el detective: eliges un lugar, encuentras qué está cambiando y "
+                "compruebas si el cambio es real o pura casualidad.")
+
+    st.subheader("Abre tu primer caso")
+    with st.container(border=True):
+        uno, dos, tres = st.columns(3)
+        tema = uno.radio("1 · ¿Qué te preocupa?", list(TEMAS))
+        with dos:
+            opciones = [c["nombre"] for c in CASOS] + ["Otro lugar..."]
+            elegido = st.selectbox("2 · ¿En dónde?", opciones)
+            lugar = CASOS[opciones.index(elegido)] if elegido != opciones[-1] else None
+            if lugar is None:
+                texto = st.text_input("Ciudad, región o país", placeholder="Ej. Guadalajara")
+                if texto.strip():
+                    try:
+                        lugares = buscar(texto.strip())
+                    except datos.ErrorDeDatos as error:
+                        lugares = []
+                        st.error(str(error))
+                    if lugares:
+                        lugar = st.selectbox("¿Cuál de estos?", lugares, format_func=lambda l: l["nombre"])
+                    else:
+                        st.warning("No encontré ese lugar. Prueba con otro nombre.")
+        with tres:
+            apuesta = st.radio("3 · Antes de ver los datos, ¿qué crees que está pasando?", APUESTAS)
+            st.caption("Un buen detective anota su sospecha antes de mirar la evidencia. "
+                       "Al final sabrás si acertaste.")
+        st.button("Abrir el caso", type="primary", disabled=lugar is None,
+                  on_click=_abrir_caso_guiado, args=(lugar, tema, apuesta))
+
+    st.subheader("Cómo trabaja el detective")
+    pasos = [
+        ("1 · La rueda de sospechosos", "Revisa todas las variables del lugar y las ordena de la que más cambia a la que menos."),
+        ("2 · La escena", "Dibuja en un mapa dónde sube, dónde baja y dónde no pasa nada."),
+        ("3 · El interrogatorio", "Somete la tendencia a cinco pruebas estadísticas. Solo la que resiste todas es sólida."),
+        ("4 · El veredicto", "Dice qué cambia, dónde, cuánto y qué tan segura es la evidencia."),
+    ]
+    for columna, (titulo, texto) in zip(st.columns(4), pasos):
+        with columna.container(border=True):
+            st.markdown(f"**{titulo}**  \n{texto}")
+
+    st.subheader("Por qué confiar en el veredicto")
+    st.markdown("Una gráfica que parece subir puede engañar. Probamos al detective con miles de "
+                "series inventadas que **no tenían ninguna tendencia**, para contar cuántas veces "
+                "daba una falsa alarma.")
+    a, b, c = st.columns(3)
+    a.metric("Falsas alarmas de la prueba que casi todos usan", "13 a 63 %",
+             help="Prueba de Mann-Kendall sin corregir, sobre series con memoria como las del clima real.")
+    b.metric("Falsas alarmas de nuestro veredicto", "3 a 5 %",
+             help="Porcentaje de series sin tendencia que llegaron a «evidencia fuerte» o «sólida».")
+    c.metric("Tendencias reales que sí detecta", "78 a 98 %",
+             help="Series con una tendencia real de 0.2 desviaciones estándar por década, en 45 años.")
+    st.caption("Los datos del clima tienen «memoria»: cada mes se parece al anterior. La prueba "
+               "común no lo toma en cuenta y ve tendencias donde no las hay. El detective sí la corrige.")
+
+    st.subheader("¿Y si comparas dos lugares?")
+    st.markdown("El mismo fenómeno puede subir en una región y bajar en otra. En el **careo** pones "
+                "dos lugares frente a frente.")
+    st.button("Ir al careo", on_click=_ir_a, args=(MODOS[2],))
+    metodo()
+
+
 def main() -> None:
     st.title("Expediente Tierra")
-    st.markdown("Elige un lugar del planeta. Descubre **qué** está cambiando ahí, **cuánto**, "
-                "y si la evidencia aguanta un interrogatorio.")
-    modo = st.sidebar.radio("¿Qué quieres hacer?", ["Investigar un lugar", "Careo: comparar dos lugares"],
-                            index=1 if _parametro("careo") else 0)
-    if modo != "Investigar un lugar":
+    st.markdown("Elige un lugar del planeta. Descubre **qué** está cambiando ahí, **dónde**, "
+                "**cuánto**, y si la evidencia aguanta un interrogatorio.")
+    if "modo" not in st.session_state:  # un enlace directo a un caso o a un careo se salta la portada
+        st.session_state["modo"] = MODOS[2] if _parametro("careo") else MODOS[1] if _parametro("caso") else MODOS[0]
+    modo = st.sidebar.radio("¿Qué quieres hacer?", MODOS, key="modo")
+    if modo == MODOS[0]:
+        pagina_inicio()
+        return
+    if modo == MODOS[2]:
         pagina_careo()
         return
-    lugar = elegir_lugar()
+
+    guiado = st.session_state.get("guiado")
+    if guiado:
+        lugar = guiado["lugar"]
+        st.sidebar.markdown(f"**Caso abierto desde la guía**  \n{lugar['nombre']}  \nTe preocupa: "
+                            f"{guiado['tema'].lower()}.")
+        if st.sidebar.button("Elegir otro lugar"):
+            del st.session_state["guiado"]
+            st.rerun()
+    else:
+        lugar = elegir_lugar()
     if lugar is None:
         st.info("Escribe un lugar en la barra lateral para abrir un caso.")
         return
@@ -468,9 +585,17 @@ def main() -> None:
         return
 
     paso_lugar(lugar, tabla_datos)
-    codigo = paso_sospechosos(sospechosos)
+    preferidas = tuple(TEMAS[guiado["tema"]]) if guiado else ()
+    codigo = paso_sospechosos(sospechosos, preferidas)
     if codigo is None:
         return
+    # La apuesta se hizo sobre el primer sospechoso de la guía; si se cambia de sospechoso ya no aplica.
+    validos = set(sospechosos.dropna(subset=["estandarizada"])["codigo"])
+    apostado = next((c for c in preferidas if c in validos), None) if guiado else None
+    if guiado and not preferidas:
+        apostado = sospechosos.dropna(subset=["estandarizada"])["codigo"].iloc[0]
+    apuesta = guiado["apuesta"] if guiado and codigo == apostado else None
+
     lado = paso_mapa(lugar, codigo)
     alcance = "El punto"
     if lado is not None:
@@ -486,7 +611,7 @@ def main() -> None:
         st.warning(str(error))
         return
     paso_interrogatorio(r)
-    paso_veredicto(r, lugar)
+    paso_veredicto(r, lugar, apuesta)
     metodo()
 
 
