@@ -11,6 +11,7 @@ import pandas as pd
 import requests
 
 POWER_URL = "https://power.larc.nasa.gov/api/temporal/monthly/point"
+POWER_REGION_URL = "https://power.larc.nasa.gov/api/temporal/monthly/regional"
 GEOCODIFICADOR_URL = "https://geocoding-api.open-meteo.com/v1/search"
 ANIO_INICIAL = 1981
 MAX_PARAMETROS = 20  # límite de la API por petición
@@ -83,6 +84,47 @@ def descargar_power(
     if usar_cache:
         DIR_CACHE.mkdir(exist_ok=True)
         tabla.to_csv(ruta)
+    return tabla
+
+
+def caja(lat: float, lon: float, lado: float) -> tuple[float, float, float, float]:
+    """Recuadro de `lado` grados centrado en el punto: (lat_min, lat_max, lon_min, lon_max)."""
+    medio = lado / 2
+    lat_c = min(max(round(lat), -90 + medio), 90 - medio)
+    lon_c = min(max(round(lon), -180 + medio), 180 - medio)
+    return lat_c - medio, lat_c + medio, lon_c - medio, lon_c + medio
+
+
+def descargar_region(lat: float, lon: float, codigo: str, lado: float = 8,
+                     inicio: int = ANIO_INICIAL, fin: int | None = None) -> pd.DataFrame:
+    """Serie mensual de una variable en cada celda de un recuadro.
+
+    Filas = meses; columnas = celdas, nombradas "lat,lon" por su centro. La API regional
+    de POWER acepta una variable por petición y recuadros de 2 a 10 grados.
+    """
+    fin = fin or dt.date.today().year
+    lat_min, lat_max, lon_min, lon_max = caja(lat, lon, lado)
+    ruta = DIR_CACHE / f"region_{codigo}_{lat_min:+.0f}_{lat_max:+.0f}_{lon_min:+.0f}_{lon_max:+.0f}_{inicio}_{fin}.csv"
+    if ruta.exists():
+        return pd.read_csv(ruta, index_col=0, parse_dates=True)
+    consulta = {"parameters": codigo, "community": "AG", "latitude-min": lat_min,
+                "latitude-max": lat_max, "longitude-min": lon_min, "longitude-max": lon_max,
+                "start": inicio, "end": fin, "format": "JSON"}
+    try:
+        respuesta = requests.get(POWER_REGION_URL, params=consulta, timeout=120)
+        respuesta.raise_for_status()
+        celdas = respuesta.json()["features"]
+        columnas = {
+            f"{c['geometry']['coordinates'][1]},{c['geometry']['coordinates'][0]}":
+                _a_tabla(c["properties"]["parameter"])[codigo]
+            for c in celdas
+        }
+    except (requests.RequestException, KeyError, ValueError, IndexError) as error:
+        raise ErrorDeDatos(f"NASA POWER no entregó la región: {error}") from error
+    tabla = pd.DataFrame(columnas).sort_index()
+    tabla = tabla.loc[:tabla.dropna(how="all").index.max()]
+    DIR_CACHE.mkdir(exist_ok=True)
+    tabla.to_csv(ruta)
     return tabla
 
 

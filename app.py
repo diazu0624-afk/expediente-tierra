@@ -8,7 +8,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from expediente import caso, datos, graficas, veredicto
+from expediente import caso, datos, graficas, region, veredicto
 from expediente.variables import CATALOGO, POR_CODIGO
 
 st.set_page_config(page_title="Expediente Tierra", page_icon="🔎", layout="wide")
@@ -53,6 +53,22 @@ def cargar_sospechosos(lat: float, lon: float) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def cargar_interrogatorio(lat: float, lon: float, codigo: str) -> caso.Interrogatorio:
     return caso.interrogar(cargar_datos(lat, lon)[codigo], POR_CODIGO[codigo])
+
+
+@st.cache_data(show_spinner=False)
+def cargar_region(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFrame:
+    return datos.descargar_region(lat, lon, codigo, lado)
+
+
+@st.cache_data(show_spinner=False)
+def cargar_mapa(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFrame:
+    return region.mapa_de_tendencias(cargar_region(lat, lon, codigo, lado), POR_CODIGO[codigo])
+
+
+@st.cache_data(show_spinner=False)
+def cargar_interrogatorio_regional(lat: float, lon: float, codigo: str, lado: int) -> caso.Interrogatorio:
+    promedio = region.promedio_regional(cargar_region(lat, lon, codigo, lado))
+    return caso.interrogar(promedio, POR_CODIGO[codigo])
 
 
 @st.cache_data(show_spinner=False)
@@ -147,9 +163,44 @@ def paso_sospechosos(sospechosos: pd.DataFrame) -> str | None:
     )
 
 
+def paso_mapa(lugar: dict, codigo: str) -> int | None:
+    """El "dónde": mapa de tendencias de la región. Devuelve el lado del recuadro, o None si falló."""
+    v = POR_CODIGO[codigo]
+    st.subheader("3 · La escena: ¿dónde cambia?")
+    lado = st.radio("Tamaño de la región alrededor del lugar", [4, 8], index=1, horizontal=True,
+                    format_func=lambda g: f"{g}° × {g}° (unos {g * 111:,} km de lado)")
+    try:
+        with st.spinner("Pidiendo la región a la NASA..."):
+            mapa = cargar_mapa(lugar["lat"], lugar["lon"], codigo, lado)
+    except datos.ErrorDeDatos as error:
+        st.warning(f"No se pudo cargar el mapa de la región. {error}")
+        return None
+    if mapa.empty:
+        st.info("Esta variable no se puede medir en ninguna celda de la región.")
+        return None
+    r = region.resumen(mapa)
+    texto = (f"**{v.nombre}** en {r['celdas']} celdas de unos 50 km. Sube de forma significativa "
+             f"en **{r['sube']:.0f} %** de la región y baja en **{r['baja']:.0f} %**.")
+    if r["sube"] >= 5 and r["baja"] >= 5:
+        texto += " **La misma variable va en direcciones opuestas dentro de la misma región.**"
+    st.markdown(texto)
+    st.plotly_chart(graficas.mapa(mapa, v.unidad, lugar["lat"], lugar["lon"]), theme=None,
+                    width="stretch", config={"displayModeBar": False})
+    st.caption("Rojo: sube. Azul: baja. El punto marca las celdas donde la tendencia es "
+               "significativa después de ajustar por haber revisado todas las celdas a la vez.")
+    with st.expander("Ver como tabla"):
+        st.dataframe(mapa, hide_index=True, width="stretch", column_config={
+            "lat": "Latitud", "lon": "Longitud",
+            "pendiente_decada": st.column_config.NumberColumn(f"Cambio por década ({v.unidad})", format="%.3g"),
+            "p": st.column_config.NumberColumn("p", format="%.3f"),
+            "p_ajustada": st.column_config.NumberColumn("p ajustada", format="%.3f"),
+            "significativa": "Significativa"})
+    return lado
+
+
 def paso_interrogatorio(r: caso.Interrogatorio) -> None:
     v = r.variable
-    st.subheader("3 · El interrogatorio")
+    st.subheader("4 · El interrogatorio")
     st.markdown(f"**{v.nombre}** ({v.unidad}). {v.definicion}  \nFuente: {v.fuente}.")
     if v.aviso:
         st.caption(v.aviso)
@@ -201,7 +252,7 @@ def paso_interrogatorio(r: caso.Interrogatorio) -> None:
 
 
 def paso_veredicto(r: caso.Interrogatorio, lugar: dict) -> None:
-    st.subheader("4 · El veredicto")
+    st.subheader("5 · El veredicto")
     v = veredicto.redactar(r)
     u = r.variable.unidad
     with st.container(border=True):
@@ -231,7 +282,8 @@ def metodo() -> None:
         st.markdown(
             """
 **Datos.** Series mensuales de [NASA POWER](https://power.larc.nasa.gov/), que reparte
-variables del reanálisis MERRA-2 para cualquier punto del planeta desde 1981.
+variables del reanálisis MERRA-2 para cualquier punto del planeta desde 1981. Para la
+región se pide cada celda de unos 50 km dentro del recuadro y se promedia según su área.
 
 **Cuánto cambia.** La pendiente de una recta ajustada por mínimos cuadrados, con un rango
 creíble al 95 % obtenido simulando 2,000 series con el mismo ruido y la misma memoria.
@@ -277,8 +329,17 @@ def main() -> None:
     codigo = paso_sospechosos(sospechosos)
     if codigo is None:
         return
+    lado = paso_mapa(lugar, codigo)
+    alcance = "El punto"
+    if lado is not None:
+        alcance = st.radio("¿A quién interrogamos?", ["El punto", "El promedio de toda la región"],
+                           horizontal=True)
     try:
-        r = cargar_interrogatorio(lugar["lat"], lugar["lon"], codigo)
+        if alcance == "El punto":
+            r = cargar_interrogatorio(lugar["lat"], lugar["lon"], codigo)
+        else:
+            r = cargar_interrogatorio_regional(lugar["lat"], lugar["lon"], codigo, lado)
+            lugar = {**lugar, "nombre": f"Región de {lado}° × {lado}° alrededor de {lugar['nombre']}"}
     except caso.CasoImposible as error:
         st.warning(str(error))
         return

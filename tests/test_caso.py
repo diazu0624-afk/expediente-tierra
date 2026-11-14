@@ -94,3 +94,28 @@ def test_respuesta_de_power_se_convierte_en_tabla_mensual():
 def test_catalogo_sin_codigos_repetidos():
     assert len(POR_CODIGO) == len(CATALOGO)
     assert all(v.definicion.endswith(".") for v in CATALOGO)
+
+
+def test_region_promedio_y_mapa_con_tendencias_opuestas():
+    from expediente import region
+    norte = {f"{lat},{lon}": _serie(0.08, semilla=k) for k, (lat, lon) in enumerate([(30.0, -100.0), (30.0, -99.375)])}
+    sur = {f"{lat},{lon}": _serie(-0.08, semilla=9 + k) for k, (lat, lon) in enumerate([(20.0, -100.0), (20.0, -99.375)])}
+    mar = {"25.0,-100.0": _serie(0.0) * np.nan}
+    cubo = pd.DataFrame({**norte, **sur, **mar})
+    mapa = region.mapa_de_tendencias(cubo, POR_CODIGO["T2M"])
+    assert len(mapa) == 4  # la celda sin datos queda fuera
+    assert (mapa[mapa["lat"] == 30.0]["pendiente_decada"] > 0.5).all()
+    assert (mapa[mapa["lat"] == 20.0]["pendiente_decada"] < -0.5).all()
+    assert mapa["significativa"].all()
+    r = region.resumen(mapa)
+    assert r == {"sube": 50.0, "baja": 50.0, "celdas": 4}
+    # Tendencias opuestas se cancelan en el promedio: por eso hace falta el mapa.
+    promedio = region.promedio_regional(cubo)
+    assert len(promedio) == 480 and promedio.notna().all()
+    assert abs(caso.interrogar(promedio, POR_CODIGO["T2M"]).pendiente_decada) < 0.2
+
+
+def test_caja_respeta_los_limites_del_planeta():
+    from expediente.datos import caja
+    assert caja(25.68, -100.32, 8) == (22, 30, -104, -96)
+    assert caja(88, 179, 8) == (82, 90, 172, 180)

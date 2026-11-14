@@ -165,3 +165,46 @@ def triangulo(r: Interrogatorio) -> go.Figure:
     fig.update_xaxes(title_text="Año en que se empieza a contar", ticks="", showline=False)
     fig.update_yaxes(title_text="Año en que se termina", showgrid=False)
     return fig
+
+
+def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float) -> go.Figure:
+    """Mapa de la región: el color de cada celda es su tendencia; el punto marca las significativas."""
+    lats, lons = np.sort(tabla["lat"].unique()), np.sort(tabla["lon"].unique())
+    alto_celda = float(np.diff(lats).min()) if lats.size > 1 else 0.5
+    ancho_celda = float(np.diff(lons).min()) if lons.size > 1 else 0.625
+    celdas = [{
+        "type": "Feature", "id": i,
+        "geometry": {"type": "Polygon", "coordinates": [[
+            [f.lon - ancho_celda / 2, f.lat - alto_celda / 2], [f.lon + ancho_celda / 2, f.lat - alto_celda / 2],
+            [f.lon + ancho_celda / 2, f.lat + alto_celda / 2], [f.lon - ancho_celda / 2, f.lat + alto_celda / 2],
+            [f.lon - ancho_celda / 2, f.lat - alto_celda / 2]]]},
+    } for i, f in enumerate(tabla.itertuples())]
+    tope = float(tabla["pendiente_decada"].abs().max()) or 1.0
+    estado = np.where(tabla["significativa"], "significativa", "no significativa")
+
+    fig = go.Figure()
+    fig.add_choroplethmap(
+        geojson={"type": "FeatureCollection", "features": celdas}, locations=list(range(len(tabla))),
+        z=tabla["pendiente_decada"], colorscale=DIVERGENTE, zmin=-tope, zmax=tope,
+        marker=dict(opacity=0.78, line=dict(width=0.5, color=SUPERFICIE)), customdata=estado,
+        colorbar=dict(title=dict(text=f"{unidad}<br>por década", font=dict(color=TINTA_2)),
+                      thickness=12, outlinewidth=0, tickfont=dict(color=TENUE)),
+        hovertemplate="%{z:+.3g} " + unidad + " por década<br>%{customdata}<extra></extra>",
+    )
+    firmes = tabla[tabla["significativa"]]
+    fig.add_scattermap(lat=firmes["lat"], lon=firmes["lon"], mode="markers", hoverinfo="skip",
+                       marker=dict(size=4, color=TINTA, opacity=0.6),
+                       name="Celda con tendencia significativa")
+    fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
+                       marker=dict(size=14, color=SUPERFICIE), showlegend=False)
+    fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
+                       marker=dict(size=9, color=TINTA), name="El lugar del caso")
+    _base(fig, alto=480)
+    # Acercamiento para que el recuadro completo quepa a lo alto (el mapa se estira hacia los polos).
+    alto_grados = (lats.max() - lats.min() + alto_celda) / np.cos(np.radians(float(lats.mean())))
+    fig.update_layout(
+        map=dict(style="carto-positron", center=dict(lat=float(lats.mean()), lon=float(lons.mean())),
+                 zoom=float(np.log2(360 * 440 / (512 * 1.15 * alto_grados)))),
+        margin=dict(l=0, r=0, t=36, b=0),
+    )
+    return fig
