@@ -5,6 +5,7 @@ Para correrla:  .venv/bin/streamlit run app.py
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 import pandas as pd
@@ -147,14 +148,21 @@ def cargar_datos(lat: float, lon: float) -> pd.DataFrame:
     return tabla
 
 
-@st.cache_data(show_spinner=False)
-def cargar_exploracion(lat: float, lon: float) -> pd.DataFrame:
-    return caso.escanear(cargar_datos(lat, lon))
+Periodo = tuple[int, int]  # (año inicial, año final), ambos incluidos
+
+
+def _recortar(tabla: pd.DataFrame, periodo: Periodo) -> pd.DataFrame:
+    return tabla.loc[str(periodo[0]):str(periodo[1])]
 
 
 @st.cache_data(show_spinner=False)
-def cargar_analisis(lat: float, lon: float, codigo: str) -> caso.Interrogatorio:
-    return caso.interrogar(cargar_datos(lat, lon)[codigo], POR_CODIGO[codigo])
+def cargar_exploracion(lat: float, lon: float, periodo: Periodo) -> pd.DataFrame:
+    return caso.escanear(_recortar(cargar_datos(lat, lon), periodo))
+
+
+@st.cache_data(show_spinner=False)
+def cargar_analisis(lat: float, lon: float, codigo: str, periodo: Periodo) -> caso.Interrogatorio:
+    return caso.interrogar(_recortar(cargar_datos(lat, lon), periodo)[codigo], POR_CODIGO[codigo])
 
 
 @st.cache_data(show_spinner=False)
@@ -165,14 +173,33 @@ def cargar_region(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFram
 
 
 @st.cache_data(show_spinner=False)
-def cargar_mapa(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFrame:
-    return region.mapa_de_tendencias(cargar_region(lat, lon, codigo, lado), POR_CODIGO[codigo])
+def cargar_mapa(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo) -> pd.DataFrame:
+    return region.mapa_de_tendencias(_recortar(cargar_region(lat, lon, codigo, lado), periodo), POR_CODIGO[codigo])
 
 
 @st.cache_data(show_spinner=False)
-def cargar_analisis_regional(lat: float, lon: float, codigo: str, lado: int) -> caso.Interrogatorio:
-    promedio = region.promedio_regional(cargar_region(lat, lon, codigo, lado))
+def cargar_analisis_regional(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo) -> caso.Interrogatorio:
+    promedio = region.promedio_regional(_recortar(cargar_region(lat, lon, codigo, lado), periodo))
     return caso.interrogar(promedio, POR_CODIGO[codigo])
+
+
+def elegir_periodo() -> Periodo | None:
+    """Barra lateral: años inicial y final del análisis. None si el periodo es demasiado corto."""
+    primero, ultimo = datos.ANIO_INICIAL, dt.date.today().year
+    desde = int(_parametro("desde")) if _parametro("desde").isdigit() else primero
+    hasta = int(_parametro("hasta")) if _parametro("hasta").isdigit() else ultimo
+    barra = st.sidebar
+    barra.markdown("**Periodo de análisis**")
+    periodo = barra.slider("Periodo de análisis", primero, ultimo,
+                           (min(max(desde, primero), ultimo), min(max(hasta, primero), ultimo)),
+                           label_visibility="collapsed")
+    barra.caption("La tendencia depende del periodo elegido. Un periodo corto puede reflejar la "
+                  "variabilidad natural de una década y no un cambio de fondo. Las variables de "
+                  "satélite empiezan después de 1981 y usan los años disponibles dentro del periodo.")
+    if periodo[1] - periodo[0] + 1 < caso.MIN_ANIOS:
+        barra.warning(f"Elige al menos {caso.MIN_ANIOS} años: con menos no se puede evaluar una tendencia.")
+        return None
+    return periodo
 
 
 @st.cache_data(show_spinner=False)
@@ -456,7 +483,7 @@ def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = ()
     return codigo
 
 
-def paso_mapa(sitio: dict, codigo: str) -> int | None:
+def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> int | None:
     """Distribución espacial de la tendencia. Devuelve el lado del recuadro, o None si falló."""
     v = POR_CODIGO[codigo]
     seccion(3, "Distribución espacial de la tendencia")
@@ -464,7 +491,7 @@ def paso_mapa(sitio: dict, codigo: str) -> int | None:
                     format_func=lambda g: f"{g}° × {g}° (unos {g * 111:,} km de lado)")
     try:
         with st.spinner("Descargando los datos de la región..."):
-            mapa = cargar_mapa(sitio["lat"], sitio["lon"], codigo, lado)
+            mapa = cargar_mapa(sitio["lat"], sitio["lon"], codigo, lado, periodo)
     except datos.ErrorDeDatos as error:
         st.warning(f"No se pudo cargar el mapa de la región. {error}")
         return None
@@ -571,6 +598,8 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
             st.markdown(f"**Años de datos necesarios.** {v.espera}")
         if v.relevancia:
             st.markdown(f"**Relevancia práctica.** {v.relevancia}")
+        if v.registro_corto:
+            st.warning(f"**Registro corto.** {v.registro_corto}", icon=":material/warning:")
         if hipotesis:
             st.markdown(_contraste_de_hipotesis(r, hipotesis))
         ficha, salvedades = st.columns(2)
@@ -637,11 +666,15 @@ def pagina_analisis() -> None:
         st.info("Escribe un lugar en la barra lateral para empezar.")
         return
 
+    periodo = elegir_periodo()
     encabezado("Análisis de un lugar", sitio["nombre"])
+    if periodo is None:
+        st.info(f"El periodo elegido es demasiado corto. Amplíalo a {caso.MIN_ANIOS} años o más en la barra lateral.")
+        return
     try:
         with st.spinner("Descargando los datos..."):
-            tabla_datos = cargar_datos(sitio["lat"], sitio["lon"])
-            exploracion = cargar_exploracion(sitio["lat"], sitio["lon"])
+            tabla_datos = _recortar(cargar_datos(sitio["lat"], sitio["lon"]), periodo)
+            exploracion = cargar_exploracion(sitio["lat"], sitio["lon"], periodo)
     except datos.ErrorDeDatos as error:
         st.error(f"No se pudieron obtener los datos. {error}")
         return
@@ -656,15 +689,15 @@ def pagina_analisis() -> None:
     planteada = next((c for c in preferidas if c in validas), validas[0]) if guiado else None
     hipotesis = guiado["hipotesis"] if guiado and codigo == planteada else None
 
-    lado = paso_mapa(sitio, codigo)
+    lado = paso_mapa(sitio, codigo, periodo)
     alcance = "El punto"
     if lado is not None:
         alcance = st.radio("Serie que se analiza", ["El punto", "El promedio de la región"], horizontal=True)
     try:
         if alcance == "El punto":
-            r = cargar_analisis(sitio["lat"], sitio["lon"], codigo)
+            r = cargar_analisis(sitio["lat"], sitio["lon"], codigo, periodo)
         else:
-            r = cargar_analisis_regional(sitio["lat"], sitio["lon"], codigo, lado)
+            r = cargar_analisis_regional(sitio["lat"], sitio["lon"], codigo, lado, periodo)
             sitio = {**sitio, "nombre": f"Región de {lado}° × {lado}° alrededor de {sitio['nombre']}"}
     except caso.CasoImposible as error:
         st.warning(str(error))
@@ -698,13 +731,15 @@ def pagina_comparacion() -> None:
     else:
         sitio_a = _sitio_a_comparar(barra, "Lugar A", 0)
         sitio_b = _sitio_a_comparar(barra, "Lugar B", 3)
+    periodo = elegir_periodo()
+    if elegida == titulos[-1]:
         if sitio_a is None or sitio_b is None:
             encabezado("Comparación de dos lugares", "Elige dos lugares")
             st.info("Elige los dos lugares en la barra lateral.")
             return
         try:
             with st.spinner("Descargando los datos..."):
-                validas = [cargar_exploracion(s["lat"], s["lon"]).dropna(subset=["estandarizada"])["codigo"]
+                validas = [cargar_exploracion(s["lat"], s["lon"], periodo or (datos.ANIO_INICIAL, dt.date.today().year)).dropna(subset=["estandarizada"])["codigo"]
                            for s in (sitio_a, sitio_b)]
         except datos.ErrorDeDatos as error:
             st.error(f"No se pudieron obtener los datos. {error}")
@@ -717,10 +752,14 @@ def pagina_comparacion() -> None:
     if sitio_a["nombre"] == sitio_b["nombre"]:
         st.info("Elige dos lugares distintos para comparar.")
         return
+    if periodo is None:
+        encabezado("Comparación de dos lugares", "Periodo demasiado corto")
+        st.info(f"Amplía el periodo a {caso.MIN_ANIOS} años o más en la barra lateral.")
+        return
 
     v = POR_CODIGO[codigo]
     nombre_a, nombre_b = sitio_a["nombre"], sitio_b["nombre"]
-    encabezado("Comparación de dos lugares", v.nombre, f"{nombre_a} y {nombre_b}.")
+    encabezado("Comparación de dos lugares", v.nombre, f"{nombre_a} y {nombre_b}, de {periodo[0]} a {periodo[1]}.")
     texto, definicion = st.columns([5, 2], vertical_alignment="center")
     texto.markdown(f"{v.definicion}  \nFuente: {v.fuente}.")
     definicion_emergente(definicion, v)
@@ -729,11 +768,11 @@ def pagina_comparacion() -> None:
     try:
         with st.spinner("Analizando los dos lugares..."):
             if alcance == "El punto":
-                a = cargar_analisis(sitio_a["lat"], sitio_a["lon"], codigo)
-                b = cargar_analisis(sitio_b["lat"], sitio_b["lon"], codigo)
+                a = cargar_analisis(sitio_a["lat"], sitio_a["lon"], codigo, periodo)
+                b = cargar_analisis(sitio_b["lat"], sitio_b["lon"], codigo, periodo)
             else:
-                a = cargar_analisis_regional(sitio_a["lat"], sitio_a["lon"], codigo, 8)
-                b = cargar_analisis_regional(sitio_b["lat"], sitio_b["lon"], codigo, 8)
+                a = cargar_analisis_regional(sitio_a["lat"], sitio_a["lon"], codigo, 8, periodo)
+                b = cargar_analisis_regional(sitio_b["lat"], sitio_b["lon"], codigo, 8, periodo)
     except (caso.CasoImposible, datos.ErrorDeDatos, KeyError) as error:
         st.warning(f"No se puede hacer esta comparación: en uno de los lugares la variable no "
                    f"se puede medir. {error}")
@@ -753,7 +792,7 @@ def pagina_comparacion() -> None:
     mapas = []
     for sitio in (sitio_a, sitio_b):
         try:
-            mapas.append(cargar_mapa(sitio["lat"], sitio["lon"], codigo, 8))
+            mapas.append(cargar_mapa(sitio["lat"], sitio["lon"], codigo, 8, periodo))
         except datos.ErrorDeDatos:
             mapas.append(pd.DataFrame())
     # Los dos mapas comparten la escala de color: el mismo tono significa el mismo cambio.

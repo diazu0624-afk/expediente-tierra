@@ -187,3 +187,12 @@ def test_relevancia_practica_y_ficha_tecnica():
     informe = veredicto.informe_markdown(grande, "X", 0.0, 0.0)
     for titulo in ("## Relevancia práctica", "## Ficha técnica", "## Supuestos", "## Limitaciones"):
         assert titulo in informe
+
+
+def test_aviso_de_registro_corto():
+    from expediente import veredicto
+    corto = caso.interrogar(_serie(0.08, anios=18, semilla=2), POR_CODIGO["T2M"])
+    largo = caso.interrogar(_serie(0.08, anios=40, semilla=2), POR_CODIGO["T2M"])
+    assert "usa 18 años" in veredicto.aviso_registro_corto(corto)
+    assert veredicto.redactar(corto).registro_corto and "## Registro corto" in veredicto.informe_markdown(corto, "X", 0.0, 0.0)
+    assert veredicto.aviso_registro_corto(largo) == "" and veredicto.redactar(largo).registro_corto == ""

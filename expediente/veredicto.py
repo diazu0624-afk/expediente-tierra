@@ -36,6 +36,7 @@ class Veredicto:
     evidencia: str
     espera: str  # vacío si no aplica
     relevancia: str  # vacío si no hay tendencia que calificar
+    registro_corto: str  # vacío si el registro alcanza el estándar climatológico
     advertencias: tuple[str, ...]
 
 
@@ -110,6 +111,20 @@ def relevancia_practica(r: Interrogatorio) -> str:
             f"de su efecto en el sistema que se estudia.")
 
 
+ANIOS_CLIMA = 30  # periodo estándar de la Organización Meteorológica Mundial para describir el clima
+
+
+def aviso_registro_corto(r: Interrogatorio) -> str:
+    """Advierte cuando el registro es más corto que el periodo estándar para describir el clima."""
+    if r.anios_de_datos >= ANIOS_CLIMA:
+        return ""
+    return (f"El análisis usa {r.anios_de_datos:.0f} años de datos. La Organización Meteorológica "
+            f"Mundial usa periodos de {ANIOS_CLIMA} años para describir el clima; en un registro más "
+            f"corto, una tendencia puede reflejar la variabilidad natural de una o dos décadas y no "
+            f"un cambio de fondo. El resultado describe lo ocurrido en este periodo, no "
+            f"necesariamente una tendencia climática.")
+
+
 def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
     """Diseño del análisis, en el formato que se pide al reportar significancia estadística."""
     inicio, fin = r.serie.index.min(), r.serie.index.max()
@@ -131,7 +146,8 @@ def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
 
 def redactar(r: Interrogatorio) -> Veredicto:
     advertencias = ((r.variable.aviso,) if r.variable.aviso else ()) + ADVERTENCIAS_GENERALES
-    return Veredicto(_titular(r), _cuanto(r), _evidencia(r), _espera(r), relevancia_practica(r), advertencias)
+    return Veredicto(_titular(r), _cuanto(r), _evidencia(r), _espera(r), relevancia_practica(r),
+                     aviso_registro_corto(r), advertencias)
 
 
 def informe_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> str:
@@ -166,6 +182,8 @@ def informe_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> s
         lineas += ["", "## Años de datos necesarios para detectarla", v.espera]
     if v.relevancia:
         lineas += ["", "## Relevancia práctica", v.relevancia]
+    if v.registro_corto:
+        lineas += ["", "## Registro corto", v.registro_corto]
     lineas += ["", "## Ficha técnica", "", "| Característica | Detalle |", "|---|---|"]
     lineas += [f"| {nombre} | {detalle} |" for nombre, detalle in ficha_tecnica(r)]
     lineas += ["", "## Supuestos"] + [f"- {supuesto}" for supuesto in SUPUESTOS]
