@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
+from . import estadistica as est
 from .caso import NIVELES, N_PRUEBAS, Interrogatorio, numero, valor_p
 
 ADVERTENCIAS_GENERALES = (
@@ -19,6 +20,14 @@ ADVERTENCIAS_GENERALES = (
     "Una tendencia significativa dice que algo está cambiando, no por qué cambia.",
 )
 
+SUPUESTOS = (
+    "La tendencia se describe con una recta. Un cambio que se acelera, se frena o se invierte "
+    "queda mal representado; la prueba de sensibilidad al periodo ayuda a detectarlo.",
+    "La autocorrelación de la serie se modela como un proceso autorregresivo de primer orden, AR(1).",
+    "La serie es homogénea: se supone que el instrumento y el método de medición no cambiaron "
+    "durante el periodo.",
+)
+
 
 @dataclass(frozen=True)
 class Veredicto:
@@ -26,6 +35,7 @@ class Veredicto:
     cuanto: str
     evidencia: str
     espera: str  # vacío si no aplica
+    relevancia: str  # vacío si no hay tendencia que calificar
     advertencias: tuple[str, ...]
 
 
@@ -81,9 +91,47 @@ def _espera(r: Interrogatorio) -> str:
             f"Hay {tenemos:.0f}: faltarían unos {r.anios_necesarios - tenemos:.0f}.")
 
 
+def relevancia_practica(r: Interrogatorio) -> str:
+    """Tamaño del cambio frente a la variabilidad natural: significativo no es lo mismo que importante."""
+    veces = r.cambio_en_variabilidad
+    if veces is None or r.nivel == "sin":
+        return ""
+    veces = abs(veces)
+    if veces < 1:
+        tamano = ("Es un cambio pequeño frente a la variabilidad natural: un año típico se aparta "
+                  "de lo normal más que eso.")
+    elif veces < 2:
+        tamano = "Es un cambio comparable a la variabilidad natural de un año a otro."
+    else:
+        tamano = "Es un cambio grande: supera con claridad la variabilidad natural de un año a otro."
+    return (f"El cambio acumulado equivale a {veces:.1f} veces la desviación estándar interanual "
+            f"(lo que la variable suele variar de un año a otro). {tamano} Que una tendencia sea "
+            f"estadísticamente significativa no implica que su magnitud sea importante: eso depende "
+            f"de su efecto en el sistema que se estudia.")
+
+
+def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
+    """Diseño del análisis, en el formato que se pide al reportar significancia estadística."""
+    inicio, fin = r.serie.index.min(), r.serie.index.max()
+    datos = "anomalías mensuales" if r.resolucion == "mensual" else "promedios anuales"
+    return [
+        ("Periodo", f"{inicio:%m/%Y} a {fin:%m/%Y}"),
+        ("Tamaño de muestra", f"{r.regresion.n} {datos}; tamaño efectivo de {r.regresion.n_efectivo:.0f} "
+                              f"tras descontar la autocorrelación (r₁ = {max(r.regresion.r1, 0):.2f})"),
+        ("Tasa de cambio", "Pendiente de una regresión lineal por mínimos cuadrados"),
+        ("Intervalo de confianza", "95 %, por bootstrap de 2,000 series con autocorrelación AR(1)"),
+        ("Nivel de significancia", f"α = {est.ALFA}, pruebas bilaterales"),
+        ("Valores p", f"Mann-Kendall con preblanqueo: {valor_p(r.mk.prueba.p)}. Prueba t con muestra "
+                      f"efectiva: {valor_p(r.regresion.p)}. Mann-Kendall sin corregir, como "
+                      f"referencia: {valor_p(r.mk_ingenuo.p)}"),
+        ("Nivel de evidencia", f"{NIVELES[r.nivel]}: {r.aprobadas} de {N_PRUEBAS} pruebas. Sólida = 5, "
+                               f"fuerte = 4, débil = 2 o 3, insuficiente = 0 o 1"),
+    ]
+
+
 def redactar(r: Interrogatorio) -> Veredicto:
     advertencias = ((r.variable.aviso,) if r.variable.aviso else ()) + ADVERTENCIAS_GENERALES
-    return Veredicto(_titular(r), _cuanto(r), _evidencia(r), _espera(r), advertencias)
+    return Veredicto(_titular(r), _cuanto(r), _evidencia(r), _espera(r), relevancia_practica(r), advertencias)
 
 
 def informe_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> str:
@@ -116,6 +164,11 @@ def informe_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> s
     lineas += ["", f"Sin corregir la autocorrelación, la prueba de Mann-Kendall daba {valor_p(r.mk_ingenuo.p)}."]
     if v.espera:
         lineas += ["", "## Años de datos necesarios para detectarla", v.espera]
+    if v.relevancia:
+        lineas += ["", "## Relevancia práctica", v.relevancia]
+    lineas += ["", "## Ficha técnica", "", "| Característica | Detalle |", "|---|---|"]
+    lineas += [f"| {nombre} | {detalle} |" for nombre, detalle in ficha_tecnica(r)]
+    lineas += ["", "## Supuestos"] + [f"- {supuesto}" for supuesto in SUPUESTOS]
     lineas += ["", "## Limitaciones"] + [f"- {a}" for a in v.advertencias]
     return "\n".join(lineas) + "\n"
 

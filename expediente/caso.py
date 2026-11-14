@@ -147,6 +147,19 @@ class Interrogatorio:
             return None
         return 100 * self.cambio_total / promedio
 
+    @property
+    def cambio_en_variabilidad(self) -> float | None:
+        """Cambio total medido en desviaciones estándar interanuales (su tamaño práctico).
+
+        La desviación estándar interanual es lo que el promedio anual suele apartarse de su
+        propia tendencia de un año a otro.
+        """
+        anios = self.anual.index.to_numpy(dtype=float)
+        valores = self.anual.to_numpy()
+        residuos = valores - np.polyval(np.polyfit(anios, valores, 1), anios)
+        sigma = float(residuos.std(ddof=1))
+        return self.cambio_total / sigma if sigma > 0 else None
+
 
 def _mk_confirma(mk: est.MannKendallSinMemoria, signo: float) -> bool:
     return mk.prueba.p < est.ALFA and np.sign(mk.prueba.s) == signo

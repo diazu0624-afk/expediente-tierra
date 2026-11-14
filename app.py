@@ -61,6 +61,14 @@ TEMAS = {
     "La variable con mayor tendencia": [],
 }
 HIPOTESIS = ["Está aumentando", "Está disminuyendo", "No está cambiando"]
+
+# Resultados de la simulación de validación (validacion/calibracion.py y validacion/veredictos.py).
+VALIDACION = {
+    "series": "300 a 400",
+    "clasica": "13–63 %", "clasica_baja": "13 %", "clasica_media": "32 %", "clasica_alta": "63 %",
+    "metodo": "3–5 %",
+    "potencia": "78–98 %", "potencia_baja": "98 %", "potencia_media": "78 %",
+}
 PAGINAS: dict[str, object] = {}  # se llena al final, cuando ya existen las funciones de página
 
 ESTILOS = """
@@ -74,6 +82,8 @@ code, .et-mono { font-family: 'DM Mono', ui-monospace, Menlo, monospace; }
 .block-container { max-width: 1180px; padding-top: 4.5rem; padding-bottom: 5rem; }
 .et-eyebrow { font-family: 'DM Mono', monospace; font-size: .72rem; letter-spacing: .1em;
   text-transform: uppercase; color: var(--tinta2); }
+.et-equipo { color: var(--tinta); margin-top: .3rem; }
+.et-nota { font-size: .97rem; line-height: 1.55; color: var(--tinta); max-width: 60rem; }
 .et-titulo { font-family: 'Inter', sans-serif; font-weight: 800; color: var(--tinta);
   font-size: clamp(2.2rem, 5vw, 3.7rem); line-height: 1.02; letter-spacing: -0.035em; margin: .4rem 0 .7rem; }
 .et-lead { font-size: 1.16rem; line-height: 1.5; max-width: 46rem; color: var(--tinta); margin: 0; }
@@ -97,9 +107,10 @@ code, .et-mono { font-family: 'DM Mono', ui-monospace, Menlo, monospace; }
 """
 
 
-def encabezado(eyebrow: str, titulo: str, lead: str = "") -> None:
+def encabezado(eyebrow: str, titulo: str, lead: str = "", equipo: str = "") -> None:
     parrafo = f'<p class="et-lead">{lead}</p>' if lead else ""
-    st.html(f'<div class="et-eyebrow">{eyebrow}</div><div class="et-titulo">{titulo}</div>{parrafo}')
+    autoria = f'<div class="et-eyebrow et-equipo">{equipo}</div>' if equipo else ""
+    st.html(f'<div class="et-eyebrow">{eyebrow}</div>{autoria}<div class="et-titulo">{titulo}</div>{parrafo}')
 
 
 def seccion(numero: int | None, titulo: str) -> None:
@@ -233,8 +244,8 @@ def pagina_inicio() -> None:
     encabezado(
         "NASA Space Apps 2026 · Earth System Trend Detective",
         "Expediente Tierra",
-        "Una herramienta para detectar tendencias en variables del sistema Tierra: qué cambia, "
-        "dónde, cuánto y si el cambio es estadísticamente significativo.",
+        "Herramienta para detectar tendencias en variables terrestres.",
+        equipo="Equipo C15H25N3O",
     )
 
     seccion(1, "Empezar un análisis")
@@ -271,18 +282,30 @@ def pagina_inicio() -> None:
                      f'<div class="t">{titulo}</div><p>{texto}</p></div>')
 
     seccion(3, "Validación del método")
-    st.markdown("Una serie que aparenta una tendencia puede no tenerla. Las pruebas se evaluaron "
-                "con series sintéticas **sin tendencia** y con autocorrelación, como las series "
-                "climáticas reales, para medir la tasa de falsos positivos.")
+    st.html(
+        '<p class="et-nota"><b>Cómo se obtuvieron estas cifras.</b> Se generaron series sintéticas de 45 años '
+        "de datos mensuales que, por construcción, no tienen ninguna tendencia, pero sí autocorrelación "
+        "(cada mes se parece al anterior), como las series climáticas reales. Cualquier tendencia "
+        "«significativa» detectada en ellas es, por definición, un falso positivo. Con un nivel de "
+        "significancia de α = 0.05, una prueba bien calibrada debe equivocarse cerca de 5 % de las veces.</p>"
+    )
     a, b, c = st.columns(3)
-    cifra(a, "Falsos positivos · prueba clásica", "13–63 %", "",
-          "Prueba de Mann-Kendall sin corregir, sobre ruido con autocorrelación de 0.3 a 0.9.")
-    cifra(b, "Falsos positivos · este método", "3–5 %", "",
-          "Series sin tendencia que alcanzaron el nivel de evidencia «fuerte» o «sólida».")
-    cifra(c, "Potencia estadística", "78–98 %", "",
-          "Tendencias reales detectadas (0.2 desviaciones estándar por década, 45 años de datos).")
-    st.caption("Las series climáticas tienen autocorrelación: cada mes se parece al anterior. La "
-               "prueba clásica supone datos independientes y por eso sobrestima la significancia.")
+    cifra(a, "Falsos positivos · prueba clásica", VALIDACION["clasica"], "",
+          "La prueba de Mann-Kendall estándar supone que los datos son independientes. Aplicada a "
+          f"esas series, declaró una tendencia falsa en {VALIDACION['clasica_baja']} de los casos con "
+          f"autocorrelación baja (0.3), {VALIDACION['clasica_media']} con autocorrelación media (0.6) y "
+          f"{VALIDACION['clasica_alta']} con autocorrelación alta (0.9).")
+    cifra(b, "Falsos positivos · este método", VALIDACION["metodo"], "",
+          "Dos medidas reducen el error. Primero, cada prueba corrige la autocorrelación antes de "
+          "evaluar la tendencia. Segundo, la evidencia solo se califica como «fuerte» o «sólida» si "
+          "coinciden al menos cuatro de las cinco pruebas. Con las mismas series, el método completo "
+          "dio un falso positivo en esa proporción de casos.")
+    cifra(c, "Potencia estadística", VALIDACION["potencia"], "",
+          "Corregir no debe volver ciega a la prueba. Al añadir a las series una tendencia real y "
+          f"modesta (0.2 desviaciones estándar por década), el método la detectó en {VALIDACION['potencia_baja']} "
+          f"de los casos con autocorrelación baja y en {VALIDACION['potencia_media']} con autocorrelación media.")
+    st.caption(f"Simulación de Monte Carlo con {VALIDACION['series']} series por escenario. El código "
+               "está en la carpeta validacion/ del repositorio.")
 
     seccion(4, "Datos")
     satelite = sum(v.origen == "gee" for v in CATALOGO)
@@ -490,7 +513,8 @@ def paso_serie(r: caso.Interrogatorio) -> None:
         plotly(graficas.serie_original(r))
 
     st.markdown("**Pruebas de significancia.** Una tendencia visible en la gráfica puede deberse al "
-                "azar. Se considera sólida solo si supera las cinco pruebas.")
+                "azar. Cada prueba se evalúa con un nivel de significancia α = 0.05, y la tendencia "
+                "se considera sólida solo si supera las cinco.")
     for prueba in r.pruebas:
         with st.container(border=True):
             estado, detalle, ayuda = st.columns([1, 7, 2], vertical_alignment="center")
@@ -545,11 +569,15 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
                     f"**Significancia.** {v.evidencia}")
         if v.espera:
             st.markdown(f"**Años de datos necesarios.** {v.espera}")
+        if v.relevancia:
+            st.markdown(f"**Relevancia práctica.** {v.relevancia}")
         if hipotesis:
             st.markdown(_contraste_de_hipotesis(r, hipotesis))
-        with st.expander("Limitaciones"):
-            for advertencia in v.advertencias:
-                st.markdown(f"- {advertencia}")
+        ficha, salvedades = st.columns(2)
+        ficha.markdown("**Ficha técnica**\n\n| Característica | Detalle |\n|---|---|\n" + "\n".join(
+            f"| {nombre} | {detalle} |" for nombre, detalle in veredicto.ficha_tecnica(r)))
+        salvedades.markdown("**Supuestos del análisis**\n\n" + "\n".join(f"- {x}" for x in veredicto.SUPUESTOS))
+        salvedades.markdown("**Limitaciones**\n\n" + "\n".join(f"- {x}" for x in v.advertencias))
     st.download_button(
         "Descargar el informe",
         veredicto.informe_markdown(r, sitio["nombre"], sitio["lat"], sitio["lon"]),

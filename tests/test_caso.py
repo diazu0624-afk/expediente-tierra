@@ -172,3 +172,18 @@ def test_cada_variable_tiene_ficha_completa_y_referencias_validas():
         assert v.referencias and all(clave in REFERENCIAS for clave in v.referencias), v.codigo
     assert all(clave in REFERENCIAS for clave in METODOS)
     assert all(r.url.startswith("https://") for r in REFERENCIAS.values())
+
+
+def test_relevancia_practica_y_ficha_tecnica():
+    from expediente import veredicto
+    grande = caso.interrogar(_serie(0.08, ruido=0.5, semilla=1), POR_CODIGO["T2M"])
+    assert grande.cambio_en_variabilidad > 2
+    texto = veredicto.relevancia_practica(grande)
+    assert "Es un cambio grande" in texto and "no implica que su magnitud sea importante" in texto
+    assert veredicto.relevancia_practica(caso.interrogar(_serie(0.0, semilla=3), POR_CODIGO["T2M"])) == ""
+    ficha = dict(veredicto.ficha_tecnica(grande))
+    assert ficha["Nivel de significancia"].startswith("α = 0.05")
+    assert "480 anomalías mensuales" in ficha["Tamaño de muestra"] and "p " in ficha["Valores p"]
+    informe = veredicto.informe_markdown(grande, "X", 0.0, 0.0)
+    for titulo in ("## Relevancia práctica", "## Ficha técnica", "## Supuestos", "## Limitaciones"):
+        assert titulo in informe

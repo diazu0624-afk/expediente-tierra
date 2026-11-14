@@ -170,10 +170,11 @@ class Variable:
 
 
 TEMPERATURA = "Temperatura"
-AGUA = "Agua y humedad"
+HIDRO = "Hidrología"
+HUMEDAD = "Humedad atmosférica"
 AIRE = "Aire y viento"
 VEGETACION = "Vegetación"
-CATEGORIAS = (TEMPERATURA, AGUA, AIRE, VEGETACION)
+CATEGORIAS = (TEMPERATURA, HIDRO, HUMEDAD, AIRE, VEGETACION)
 
 # No se incluyen nubosidad, radiación solar ni albedo: POWER los toma de CERES SYN1deg, que
 # tiene saltos artificiales cuando cambian los satélites (2001, 2017-2018, 2022).
@@ -222,53 +223,53 @@ CATALOGO: tuple[Variable, ...] = (
              "debajo del umbral de 18.3 °C (65 °F). Indicador estándar de demanda de calefacción.",
              "Calculada por NASA POWER a partir de la temperatura a 2 m de MERRA-2.", _SLV,
              relativo=True),
-    # --- Agua y humedad ---
-    Variable("PRECTOTCORR", "Precipitación (reanálisis)", "mm/día", AGUA,
+    # --- Hidrología y humedad atmosférica ---
+    Variable("PRECTOTCORR", "Precipitación (reanálisis)", "mm/día", HIDRO,
              "Lluvia y nieve que caen en promedio cada día, según el modelo de la NASA.",
              "Precipitación total media en superficie del reanálisis MERRA-2, corregida de "
              "sesgo con observaciones de pluviómetros y satélites.",
              "MERRA-2, campo PRECTOTCORR de la colección de flujos tavg1_2d_flx_Nx.",
              ("gelaro2017", "reichle2017a", "gmao_flx", "power"), relativo=True),
-    Variable("PRECSNOLAND", "Nevadas", "mm/día", AGUA,
+    Variable("PRECSNOLAND", "Nevadas", "mm/día", HIDRO,
              "La parte de la precipitación que cae en forma de nieve.",
              "Precipitación en forma de nieve sobre tierra, en equivalente de agua líquida.",
              "MERRA-2, campo PRECSNOLAND de la colección de superficie terrestre tavg1_2d_lnd_Nx.",
              _LND, relativo=True),
-    Variable("SNODP", "Profundidad de la nieve", "cm", AGUA,
+    Variable("SNODP", "Profundidad de la nieve", "cm", HIDRO,
              "Grosor de la capa de nieve acumulada sobre el suelo.",
              "Espesor del manto de nieve sobre tierra.",
              "MERRA-2, campo SNODP de la colección tavg1_2d_lnd_Nx.", _LND, relativo=True),
-    Variable("GWETTOP", "Humedad del suelo superficial", "fracción (0–1)", AGUA,
+    Variable("GWETTOP", "Humedad del suelo superficial", "fracción (0–1)", HIDRO,
              "Qué tan mojados están los primeros 5 cm del suelo: 0 es totalmente seco y 1 "
              "es empapado.",
              "Grado de saturación de agua en los 5 cm superiores del suelo: 0 corresponde a "
              "suelo completamente seco y 1 a suelo saturado.",
              "MERRA-2, campo GWETTOP de la colección tavg1_2d_lnd_Nx.", _LND, relativo=True),
-    Variable("GWETROOT", "Humedad del suelo en la zona de raíces", "fracción (0–1)", AGUA,
+    Variable("GWETROOT", "Humedad del suelo en la zona de raíces", "fracción (0–1)", HIDRO,
              "Qué tan mojado está el primer metro del suelo, de donde beben las plantas: "
              "0 es totalmente seco y 1 es empapado.",
              "Grado de saturación de agua en la zona radicular, aproximadamente el primer "
              "metro de suelo: 0 corresponde a suelo completamente seco y 1 a suelo saturado.",
              "MERRA-2, campo GWETROOT de la colección tavg1_2d_lnd_Nx.", _LND, relativo=True),
-    Variable("EVLAND", "Evaporación", "mm/día", AGUA,
+    Variable("EVLAND", "Evaporación", "mm/día", HIDRO,
              "Agua que pasa del suelo y de las plantas al aire.",
              "Flujo de evaporación desde la superficie terrestre (suelo, vegetación y nieve).",
              "MERRA-2, campo EVLAND de la colección tavg1_2d_lnd_Nx.", _LND, relativo=True),
-    Variable("QV2M", "Humedad específica", "g/kg", AGUA,
+    Variable("QV2M", "Humedad específica", "g/kg", HUMEDAD,
              "Cuántos gramos de agua invisible (vapor) hay en cada kilogramo de aire.",
              "Razón entre la masa de vapor de agua y la masa total de aire a 2 m.",
              "MERRA-2, campo QV2M de la colección tavg1_2d_slv_Nx.", _SLV, relativo=True),
-    Variable("RH2M", "Humedad relativa", "%", AGUA,
+    Variable("RH2M", "Humedad relativa", "%", HUMEDAD,
              "Qué tan cerca está el aire de saturarse de vapor: con 100 % se forma niebla o rocío.",
              "Razón entre la presión de vapor y la presión de vapor de saturación respecto a "
              "una superficie plana de agua pura, a 2 m, en porcentaje.",
              "Calculada por NASA POWER a partir de temperatura, humedad y presión de MERRA-2.", _SLV),
-    Variable("T2MDEW", "Punto de rocío", "°C", AGUA,
+    Variable("T2MDEW", "Punto de rocío", "°C", HUMEDAD,
              "La temperatura a la que el aire tendría que enfriarse para formar rocío. "
              "Sube cuando el aire trae más humedad.",
              "Temperatura de punto de rocío o de escarcha a 2 m sobre la superficie.",
              "MERRA-2, campo T2MDEW de la colección tavg1_2d_slv_Nx.", _SLV),
-    Variable("TQV", "Agua precipitable total", "kg/m²", AGUA,
+    Variable("TQV", "Agua precipitable total", "kg/m²", HUMEDAD,
              "Toda el agua en forma de vapor que hay sobre el lugar, desde el suelo hasta "
              "el espacio.",
              "Vapor de agua total contenido en una columna vertical de sección unitaria, "
@@ -316,7 +317,7 @@ CATALOGO: tuple[Variable, ...] = (
                    "medición directa. El producto SYN1deg puede tener discontinuidades cuando "
                    "cambian los satélites que lo alimentan."),
     # --- Instrumentos de satélite (observaciones, no un modelo) ---
-    Variable("GPM_LLUVIA", "Precipitación (satélite GPM)", "mm/día", AGUA,
+    Variable("GPM_LLUVIA", "Precipitación (satélite GPM)", "mm/día", HIDRO,
              "Lluvia y nieve observadas por una constelación de satélites con radares y "
              "sensores de microondas, afinadas con pluviómetros en tierra.",
              "Precipitación media mensual del algoritmo IMERG (Final Run), que combina los "
@@ -327,7 +328,7 @@ CATALOGO: tuple[Variable, ...] = (
              ("huffman2023", "huffman2020", "gorelick2017"), fuente=GPM,
              resolucion="0.1° nativo, muestreado a 0.5° (unos 50 km)", desde=1998,
              relativo=True, origen="gee"),
-    Variable("GRACE_AGUA", "Almacenamiento de agua terrestre (GRACE)", "cm de agua", AGUA,
+    Variable("GRACE_AGUA", "Almacenamiento de agua terrestre (GRACE)", "cm de agua", HIDRO,
              "Toda el agua guardada en el lugar: acuíferos, suelo, ríos y nieve. Dos satélites "
              "gemelos la «pesan» midiendo cómo cambia la gravedad. Se expresa en centímetros "
              "de agua de más o de menos respecto al promedio de 2004 a 2009.",
