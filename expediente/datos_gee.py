@@ -14,10 +14,10 @@ import os
 import numpy as np
 import pandas as pd
 
-from .datos import DIR_CACHE, ErrorDeDatos, caja
+from .datos import DIR_CACHE, ErrorDeDatos, caja, guardar_en_cache, leer_cache, vigente
 
 PROYECTO = os.environ.get("EXPEDIENTE_EE_PROYECTO", "project-7492083c-8d82-4592-953")
-LADO_CUBO = 8  # grados; el cubo siempre se baja de este tamaño y luego se recorta
+LADO_CUBO = 10  # grados; el cubo siempre se baja de este tamaño y luego se recorta
 CELDA = 0.5  # grados
 SIN_DATO = -9999.0
 
@@ -50,15 +50,20 @@ def _ruta(codigo: str, lat: float, lon: float) -> "os.PathLike":
 
 
 def descargar_cubo(lat: float, lon: float, codigo: str) -> pd.DataFrame:
-    """Serie mensual de un instrumento en cada celda del recuadro de 8° alrededor del punto.
+    """Serie mensual de un instrumento en cada celda del recuadro de 10° alrededor del punto.
 
     Filas = meses; columnas = celdas nombradas "lat,lon" por su centro. Earth Engine
     promedia los píxeles originales (de 1 a 50 km según el instrumento) hasta la celda.
     """
     ruta = _ruta(codigo, lat, lon)
-    if ruta.exists():
-        return pd.read_csv(ruta, index_col=0, parse_dates=True)
-    ee = _ee()
+    if vigente(ruta):
+        return leer_cache(ruta)
+    try:
+        ee = _ee()
+    except ErrorDeDatos:
+        if ruta.exists():  # sin sesión de Earth Engine: se usa lo ya descargado
+            return leer_cache(ruta)
+        raise
     coleccion_id, banda, factor = FUENTES[codigo]
     lat_min, lat_max, lon_min, lon_max = caja(lat, lon, LADO_CUBO)
     n = int(LADO_CUBO / CELDA)
@@ -76,6 +81,8 @@ def descargar_cubo(lat: float, lon: float, codigo: str) -> pd.DataFrame:
         # Un campo por mes: el encabezado crece más de lo que numpy acepta por omisión.
         pixeles = np.load(io.BytesIO(crudo), max_header_size=1_000_000)
     except Exception as error:
+        if ruta.exists():
+            return leer_cache(ruta)
         raise ErrorDeDatos(f"Earth Engine no entregó {codigo}: {str(error)[:200]}") from error
 
     valores = np.stack([pixeles[nombre] for nombre in pixeles.dtype.names]).astype(float)  # (mes, fila, col)
@@ -87,8 +94,7 @@ def descargar_cubo(lat: float, lon: float, codigo: str) -> pd.DataFrame:
     columnas = [f"{la},{lo}" for la in lats for lo in lons]
     tabla = pd.DataFrame(valores.reshape(len(meses), -1) * factor, index=meses, columns=columnas)
     tabla = tabla.groupby(level=0).mean().dropna(how="all", axis=1)
-    DIR_CACHE.mkdir(exist_ok=True)
-    tabla.to_csv(ruta, float_format="%.5g")
+    guardar_en_cache(tabla, ruta, float_format="%.5g")
     return tabla
 
 

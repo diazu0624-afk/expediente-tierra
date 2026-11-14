@@ -13,7 +13,6 @@ from . import estadistica as est
 from .caso import NIVELES, N_PRUEBAS, Interrogatorio, numero, valor_p
 
 ADVERTENCIAS_GENERALES = (
-    "Los datos describen un cuadro de unos 50 km de lado alrededor del punto, no el punto exacto.",
     "Las variables de MERRA-2 combinan un modelo con observaciones, y los cambios de instrumentos a "
     "lo largo de las décadas pueden dejar huella en algunas series. Las de GPM, MODIS y GRACE son "
     "observaciones de satélite, con registros más cortos.",
@@ -36,6 +35,7 @@ class Veredicto:
     evidencia: str
     espera: str  # vacío si no aplica
     relevancia: str  # vacío si no hay tendencia que calificar
+    no_lineal: str  # vacío si una recta describe razonablemente la serie
     registro_corto: str  # vacío si el registro alcanza el estándar climatológico
     advertencias: tuple[str, ...]
 
@@ -125,6 +125,28 @@ def aviso_registro_corto(r: Interrogatorio) -> str:
             f"necesariamente una tendencia climática.")
 
 
+def cambio_de_comportamiento(r: Interrogatorio) -> str:
+    """Describe la regresión en dos tramos: ¿la tendencia se mantuvo, cambió de ritmo o se invirtió?"""
+    c = r.cambio
+    if c is None:
+        return ""
+    u = r.variable.unidad
+    antes, despues = numero(c.antes.pendiente * 10, signo=True), numero(c.despues.pendiente * 10, signo=True)
+    tramos = f"{antes} {u} por década hasta {c.anio} y {despues} después"
+    if c.cambia_de_signo:
+        return (f"La tendencia se invirtió alrededor de {c.anio}: {tramos}. Una sola recta no describe "
+                f"bien esta serie; la tasa de cambio global promedia dos comportamientos opuestos.")
+    if c.mejora < 0.25:
+        return (f"Dividir la serie en dos tramos apenas mejora el ajuste ({100 * c.mejora:.0f} % menos "
+                f"error): una sola recta la describe razonablemente.")
+    return (f"El mayor cambio de comportamiento ocurre alrededor de {c.anio}: {tramos}. La tendencia "
+            f"no se invirtió, pero su ritmo no fue constante.")
+
+
+def aviso_no_lineal(r: Interrogatorio) -> str:
+    return cambio_de_comportamiento(r) if r.cambio is not None and r.cambio.cambia_de_signo else ""
+
+
 def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
     """Diseño del análisis, en el formato que se pide al reportar significancia estadística."""
     inicio, fin = r.serie.index.min(), r.serie.index.max()
@@ -134,6 +156,8 @@ def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
         ("Tamaño de muestra", f"{r.regresion.n} {datos}; tamaño efectivo de {r.regresion.n_efectivo:.0f} "
                               f"tras descontar la autocorrelación (r₁ = {max(r.regresion.r1, 0):.2f})"),
         ("Tasa de cambio", "Pendiente de una regresión lineal por mínimos cuadrados"),
+        ("Coeficiente de determinación R²", f"{r.regresion.r2:.2f}: la recta explica {100 * r.regresion.r2:.0f} % de la "
+                                            f"variación de los datos; el resto es variabilidad alrededor de la tendencia"),
         ("Intervalo de confianza", "95 %, por bootstrap de 2,000 series con autocorrelación AR(1)"),
         ("Nivel de significancia", f"α = {est.ALFA}, pruebas bilaterales"),
         ("Valores p", f"Mann-Kendall con preblanqueo: {valor_p(r.mk.prueba.p)}. Prueba t con muestra "
@@ -145,9 +169,11 @@ def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
 
 
 def redactar(r: Interrogatorio) -> Veredicto:
-    advertencias = ((r.variable.aviso,) if r.variable.aviso else ()) + ADVERTENCIAS_GENERALES
+    resolucion = (f"Cada dato representa un área, no un sitio puntual. Resolución espacial de esta "
+                  f"variable: {r.variable.resolucion}.")
+    advertencias = ((r.variable.aviso,) if r.variable.aviso else ()) + (resolucion,) + ADVERTENCIAS_GENERALES
     return Veredicto(_titular(r), _cuanto(r), _evidencia(r), _espera(r), relevancia_practica(r),
-                     aviso_registro_corto(r), advertencias)
+                     aviso_no_lineal(r), aviso_registro_corto(r), advertencias)
 
 
 def informe_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> str:
@@ -182,6 +208,8 @@ def informe_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> s
         lineas += ["", "## Años de datos necesarios para detectarla", v.espera]
     if v.relevancia:
         lineas += ["", "## Relevancia práctica", v.relevancia]
+    if cambio_de_comportamiento(r):
+        lineas += ["", "## Cambio de comportamiento", cambio_de_comportamiento(r)]
     if v.registro_corto:
         lineas += ["", "## Registro corto", v.registro_corto]
     lineas += ["", "## Ficha técnica", "", "| Característica | Detalle |", "|---|---|"]

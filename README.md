@@ -68,6 +68,7 @@ sin internet.
 .venv/bin/python -m pytest
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del veredicto completo
+.venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas
 ```
 
 ## Método en breve
@@ -77,6 +78,8 @@ sin internet.
 - **Si es significativo:** cinco pruebas. Mann-Kendall con preblanqueo iterativo
   (Zhang et al., 2000), prueba t con muestra efectiva (Santer et al., 2000), intervalo de
   confianza, repetición con promedios anuales y estabilidad al cambiar las fechas.
+- **Dónde cambia:** mapa de tendencia por celda en un recuadro de 2° a 10°; se puede analizar
+  el punto, el promedio regional o una celda del mapa, en el periodo que se elija.
 - **Qué variables mirar:** se exploran todas y se ordenan por tendencia estandarizada,
   con ajuste de Benjamini-Hochberg por comparaciones múltiples.
 - **Cuánto falta para detectarla:** fórmula de Weatherhead et al. (1998).

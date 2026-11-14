@@ -55,6 +55,11 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
     Al pasar el cursor por una barra aparece la definición corta de la variable.
     """
     datos = tabla.dropna(subset=["estandarizada"]).iloc[::-1]  # la más fuerte queda arriba
+    # Las variables con registro más corto que el resto lo llevan en la etiqueta: una
+    # tendencia de 19 años no se compara de igual a igual con una de 46.
+    mas_largo = datos["anios"].max() if len(datos) else 0
+    datos = datos.assign(etiqueta=[f"{f.nombre} · {f.anios} años" if f.anios < mas_largo else f.nombre
+                                   for f in datos.itertuples()])
     fig = go.Figure()
     grupos = [
         ("Positiva · significativa", True, True, ROJO),
@@ -66,12 +71,12 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
         g = datos[((datos["estandarizada"] > 0) == sube) & (datos["significativa"] == significativa)]
         detalle = [
             "<i>" + "<br>".join(textwrap.wrap(POR_CODIGO[f.codigo].definicion, 62)) + "</i><br><br>"
-            f"{numero(f.pendiente_decada, signo=True)} {f.unidad} por década<br>"
+            f"{numero(f.pendiente_decada, signo=True)} {f.unidad} por década, con {f.anios} años de datos<br>"
             f"{valor_p(f.p_ajustada)} (ajustado por comparar {len(datos)} variables)"
             for f in g.itertuples()
         ]
         fig.add_bar(
-            name=nombre, y=g["nombre"], x=g["estandarizada"], orientation="h", width=0.62,
+            name=nombre, y=g["etiqueta"], x=g["estandarizada"], orientation="h", width=0.62,
             marker=dict(color=color, cornerradius=4),
             text=[f"{x:+.2f}" for x in g["estandarizada"]] if significativa else None,
             textposition="outside", textfont=dict(color=TINTA_2, size=11, family=FUENTE_CIFRAS), cliponaxis=False,
@@ -85,7 +90,7 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
         range=[-tope, tope], zeroline=True, zerolinecolor=EJE, zerolinewidth=1, showline=False,
         title_text="Tendencia estandarizada (desviaciones estándar interanuales por década)",
     )
-    fig.update_yaxes(showgrid=False, categoryorder="array", categoryarray=list(datos["nombre"]),
+    fig.update_yaxes(showgrid=False, categoryorder="array", categoryarray=list(datos["etiqueta"]),
                      tickfont=dict(color=TINTA_2, family=FUENTE, size=12.5), ticks="")
     return fig
 
@@ -180,11 +185,13 @@ def triangulo(r: Interrogatorio) -> go.Figure:
 
 
 def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
-         tope: float | None = None, alejar: float = 0.0) -> go.Figure:
+         tope: float | None = None, alejar: float = 0.0,
+         celda: tuple[float, float] | None = None) -> go.Figure:
     """Mapa de la región: el color de cada celda es su tendencia; el punto marca las significativas.
 
     `tope` fija el extremo de la escala de color (para comparar dos mapas con la misma
     vara) y `alejar` reduce el acercamiento cuando el mapa se dibuja en una columna angosta.
+    `celda` (latitud, longitud) rodea con un anillo la celda cuya serie se analiza.
     """
     lats, lons = np.sort(tabla["lat"].unique()), np.sort(tabla["lon"].unique())
     alto_celda = float(np.diff(lats).min()) if lats.size > 1 else 0.5
@@ -216,6 +223,11 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
                        marker=dict(size=14, color=SUPERFICIE), showlegend=False)
     fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
                        marker=dict(size=9, color=TINTA), name="Sitio de estudio")
+    if celda is not None:
+        for tamano, color, visible in ((22, TINTA, True), (16, SUPERFICIE, False)):
+            fig.add_scattermap(lat=[celda[0]], lon=[celda[1]], mode="markers", hoverinfo="skip",
+                               marker=dict(size=tamano, color=color, opacity=1 if visible else 0.85),
+                               name="Celda analizada", showlegend=visible)
     _base(fig, alto=480)
     # Acercamiento para que el recuadro completo quepa a lo alto (el mapa se estira hacia los polos).
     alto_grados = (lats.max() - lats.min() + alto_celda) / np.cos(np.radians(float(lats.mean())))

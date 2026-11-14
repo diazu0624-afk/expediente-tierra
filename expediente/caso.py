@@ -106,6 +106,7 @@ class Interrogatorio:
     fraccion_ventanas: float
     pruebas: tuple[Prueba, ...]
     anios_necesarios: float
+    cambio: est.PuntoDeCambio | None  # regresión en dos tramos sobre los promedios anuales
 
     @property
     def aprobadas(self) -> int:
@@ -284,7 +285,8 @@ def interrogar(serie_mensual: pd.Series, variable: Variable) -> Interrogatorio:
 
     return Interrogatorio(variable, "mensual" if mensual else "anual", serie, anomalias, anual,
                           t, y, regresion, ic_historias, mk, est.mann_kendall(y), sen,
-                          triangulo, fraccion, pruebas, necesarios)
+                          triangulo, fraccion, pruebas, necesarios,
+                          est.punto_de_cambio(anios, anual.to_numpy()))
 
 
 def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO) -> pd.DataFrame:

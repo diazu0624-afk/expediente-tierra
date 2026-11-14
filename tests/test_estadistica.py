@@ -181,3 +181,96 @@ def test_benjamini_hochberg_ejemplo_conocido():
     ajustados = est.benjamini_hochberg(p)
     assert ajustados == pytest.approx([0.025, 0.05, 0.05, 0.025, 0.5])
     assert (ajustados >= p).all()
+
+
+def _con_huecos(rng, n=540, phi=0.6):
+    """Serie AR(1) mensual a la que se le quita un año entero y veinte meses sueltos."""
+    y = _ar1(rng, n, phi)
+    quitar = np.zeros(n, dtype=bool)
+    quitar[200:212] = True
+    quitar[rng.choice(np.setdiff1d(np.arange(20, n - 20), np.arange(200, 212)), 20, replace=False)] = True
+    return (np.arange(n) / 12)[~quitar], y[~quitar]
+
+
+def test_pares_consecutivos_detecta_los_huecos():
+    t = np.array([0, 1, 2, 5, 6, 8], dtype=float)
+    assert est.pares_consecutivos(t).tolist() == [True, True, False, True, False]
+    assert est.pares_consecutivos(np.arange(10.0)).all()
+
+
+def test_sin_huecos_el_resultado_no_cambia():
+    rng = np.random.default_rng(11)
+    x = _ar1(rng, 300, 0.5)
+    todos = np.ones(299, dtype=bool)
+    assert est.autocorrelacion_lag1(x, todos) == pytest.approx(est.autocorrelacion_lag1(x))
+
+
+def test_la_memoria_se_estima_bien_aunque_falten_datos():
+    rng = np.random.default_rng(12)
+    con_pares, sin_pares = [], []
+    for _ in range(200):
+        t, y = _con_huecos(rng)
+        residuos = y - np.polyval(np.polyfit(t, y, 1), t)
+        con_pares.append(est.memoria_de_residuos(residuos, est.pares_consecutivos(t)))
+        sin_pares.append(est.memoria_de_residuos(residuos))
+    assert np.mean(con_pares) == pytest.approx(0.6, abs=0.03)
+    # Tratar los huecos como vecinos subestima la memoria (poco, si los huecos son pocos).
+    assert np.mean(sin_pares) < np.mean(con_pares)
+    assert abs(np.mean(con_pares) - 0.6) < abs(np.mean(sin_pares) - 0.6)
+
+
+def test_las_pruebas_siguen_calibradas_con_huecos():
+    rng = np.random.default_rng(13)
+    falsos = {"mk": 0, "t": 0, "ic": 0}
+    repeticiones = 300
+    for k in range(repeticiones):
+        t, y = _con_huecos(rng)
+        falsos["mk"] += est.mann_kendall_sin_memoria(t, y).prueba.p < 0.05
+        falsos["t"] += est.regresion_lineal(t, y).p < 0.05
+        bajo, alto = est.ic_historias_alternativas(t, y, repeticiones=500, semilla=k)
+        falsos["ic"] += not (bajo <= 0 <= alto)
+    assert all(f / repeticiones < 0.10 for f in falsos.values()), falsos
+
+
+def test_r2_coincide_con_scipy():
+    rng = np.random.default_rng(14)
+    t = np.arange(120, dtype=float)
+    y = 0.03 * t + rng.normal(size=120)
+    assert est.regresion_lineal(t, y).r2 == pytest.approx(stats.linregress(t, y).rvalue ** 2)
+
+
+def test_la_correccion_de_sesgo_tiene_tope_en_series_cortas():
+    residuos = np.array([3, 2.5, 2.8, 1.9, 1.2, 0.4, -0.3, -1.1, -0.6, -1.9, -2.4, -2.0, -3.1, -1.8, -0.9, 0.2, 1.1, 2.0, 2.9])
+    cruda = est.autocorrelacion_lag1(residuos)
+    assert est.memoria_de_residuos(residuos) == pytest.approx(min(cruda + est.TOPE_CORRECCION, 0.98))
+    largos = np.tile(residuos, 20)  # con muchos datos el tope no actúa
+    assert est.memoria_de_residuos(largos) < est.autocorrelacion_lag1(largos) + est.TOPE_CORRECCION
+
+
+def test_serie_que_baja_todos_los_anios_pasa_la_prueba_corregida():
+    # Almacenamiento de agua en Delhi (GRACE), promedios anuales con dos años faltantes.
+    anios = np.array([2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2016, 2019, 2020, 2021, 2022, 2023, 2024.0])
+    agua = np.array([35.3, 22.0, 19.3, 1.0, -8.9, -11.7, -21.7, -25.8, -18.1, -33.3, -32.3, -39.2, -68.9, -86.2, -92.9, -110.2, -109.9, -110.8, -122.4])
+    resultado = est.mann_kendall_sin_memoria(anios, agua)
+    assert resultado.prueba.p < 0.01 and resultado.prueba.s < 0
+
+
+def test_punto_de_cambio_distingue_tendencia_sostenida_de_inversion():
+    rng = np.random.default_rng(21)
+    anios = np.arange(1985, 2025, dtype=float)
+    sostenida = 0.05 * (anios - 1985) + rng.normal(0, 0.15, anios.size)
+    c = est.punto_de_cambio(anios, sostenida)
+    assert not c.cambia_de_signo and c.antes.pendiente > 0 and c.despues.pendiente > 0
+    invertida = np.where(anios <= 2005, 0.08 * (anios - 1985), 0.08 * 20 - 0.08 * (anios - 2005)) + rng.normal(0, 0.15, anios.size)
+    c = est.punto_de_cambio(anios, invertida)
+    assert c.cambia_de_signo and c.antes.pendiente > 0 > c.despues.pendiente
+    assert abs(c.anio - 2005) <= 2 and c.mejora > 0.8
+    assert est.punto_de_cambio(anios[:8], sostenida[:8]) is None
+
+
+def test_punto_de_cambio_rara_vez_inventa_una_inversion():
+    rng = np.random.default_rng(22)
+    anios = np.arange(45, dtype=float)
+    solo_ruido = sum(est.punto_de_cambio(anios, rng.normal(size=45)).cambia_de_signo for _ in range(400))
+    con_tendencia = sum(est.punto_de_cambio(anios, 0.03 * anios + rng.normal(size=45)).cambia_de_signo for _ in range(400))
+    assert solo_ruido / 400 < 0.05 and con_tendencia / 400 < 0.05

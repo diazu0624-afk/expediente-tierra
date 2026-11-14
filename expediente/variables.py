@@ -101,6 +101,14 @@ REFERENCIAS: dict[str, Referencia] = {
         "Gorelick, N., Hancher, M., Dixon, M., Ilyushchenko, S., Thau, D., & Moore, R. (2017). "
         "Google Earth Engine: Planetary-scale geospatial analysis for everyone. Remote "
         "Sensing of Environment, 202, 18–27.", _doi("10.1016/j.rse.2017.06.031")),
+    # --- Estudios publicados con los que se contrastan los ejemplos ---
+    "rodell2009": Referencia(
+        "Rodell, M., Velicogna, I., & Famiglietti, J. S. (2009). Satellite-based estimates of "
+        "groundwater depletion in India. Nature, 460(7258), 999–1002.", _doi("10.1038/nature08238")),
+    "ratnam2021": Referencia(
+        "Ratnam, M. V., Prasad, P., Akhil Raj, S. T., Roja Raman, M., & Basha, G. (2021). Changing "
+        "patterns in aerosol vertical distribution over South and East Asia. Scientific Reports, "
+        "11, 308.", _doi("10.1038/s41598-020-79361-4")),
     # --- Métodos estadísticos ---
     "mann1945": Referencia(
         "Mann, H. B. (1945). Nonparametric tests against trend. Econometrica, 13(3), 245–259.",
@@ -167,6 +175,14 @@ class Variable:
     aviso: str = ""
     # "power": NASA POWER (reanálisis). "gee": instrumento de satélite por Earth Engine.
     origen: str = "power"
+
+    @property
+    def nombre_original(self) -> str:
+        return NOMBRES_ORIGINALES[self.codigo]
+
+    @property
+    def relevancia(self) -> str:
+        return RELEVANCIA[self.codigo]
 
 
 TEMPERATURA = "Temperatura"
@@ -354,5 +370,54 @@ CATALOGO: tuple[Variable, ...] = (
              resolucion="1 km nativo, muestreado a 0.5° (unos 50 km)", desde=2000,
              relativo=True, origen="gee"),
 )
+
+# Nombre con el que el proveedor publica cada variable (para buscarla en su documentación).
+NOMBRES_ORIGINALES = {
+    "T2M": "Temperature at 2 Meters", "T2M_MAX": "Temperature at 2 Meters Maximum",
+    "T2M_MIN": "Temperature at 2 Meters Minimum", "T2M_RANGE": "Temperature at 2 Meters Range",
+    "TS": "Earth Skin Temperature", "FROST_DAYS": "Frost Days",
+    "CDD18_3": "Cooling Degree Days Above 18.3 C", "HDD18_3": "Heating Degree Days Below 18.3 C",
+    "PRECTOTCORR": "Precipitation Corrected", "PRECSNOLAND": "Snow Precipitation Land",
+    "SNODP": "Snow Depth", "GWETTOP": "Surface Soil Wetness", "GWETROOT": "Root Zone Soil Wetness",
+    "EVLAND": "Evaporation Land", "QV2M": "Specific Humidity at 2 Meters",
+    "RH2M": "Relative Humidity at 2 Meters", "T2MDEW": "Dew/Frost Point at 2 Meters",
+    "TQV": "Total Column Precipitable Water", "WS10M": "Wind Speed at 10 Meters",
+    "WS50M": "Wind Speed at 50 Meters", "PS": "Surface Pressure", "TO3": "Total Column Ozone",
+    "TROPPB": "Tropopause Pressure based on blended estimate", "AOD_55": "Aerosol Optical Depth 55",
+    "GPM_LLUVIA": "Merged satellite-gauge precipitation estimate (precipitation)",
+    "GRACE_AGUA": "Liquid Water Equivalent Thickness (lwe_thickness)",
+    "MODIS_NDVI": "Normalized Difference Vegetation Index (NDVI)",
+}
+
+# Por qué importa cada variable para el sistema Tierra.
+RELEVANCIA = {
+    "T2M": "Es el indicador básico del calentamiento global y condiciona la salud, la agricultura y la demanda de energía.",
+    "T2M_MAX": "Los extremos de calor determinan las olas de calor, el estrés térmico y el riesgo de incendios.",
+    "T2M_MIN": "Las mínimas controlan las heladas y el descanso nocturno de personas y cultivos.",
+    "T2M_RANGE": "Responde a cambios en la nubosidad, la humedad y el uso del suelo: se reduce cuando las noches se calientan más que los días.",
+    "TS": "Gobierna el intercambio de calor entre la superficie y la atmósfera y delata efectos locales como la isla de calor urbana.",
+    "FROST_DAYS": "Marca la duración de la temporada de cultivo y la supervivencia de plagas y de cultivos sensibles al frío.",
+    "CDD18_3": "Traduce el calentamiento en demanda de electricidad para enfriar edificios.",
+    "HDD18_3": "Traduce el clima en demanda de energía para calefacción; disminuye cuando los inviernos se suavizan.",
+    "PRECTOTCORR": "Es la entrada principal del ciclo del agua: de ella dependen ríos, acuíferos, cultivos y sequías.",
+    "PRECSNOLAND": "La nieve almacena agua en invierno y la libera en primavera; sus cambios alteran el caudal de los ríos.",
+    "SNODP": "El manto de nieve refleja la luz solar y es una reserva de agua; su reducción amplifica el calentamiento.",
+    "GWETTOP": "Controla cuánta lluvia se infiltra o escurre y cuánta energía del Sol se gasta en evaporar agua.",
+    "GWETROOT": "Es el agua disponible para las plantas: su descenso anticipa la sequía agrícola.",
+    "EVLAND": "Devuelve agua a la atmósfera y enfría la superficie; enlaza el ciclo del agua con el de la energía.",
+    "QV2M": "El aire más caliente puede contener más vapor, lo que intensifica el efecto invernadero y las lluvias extremas.",
+    "RH2M": "Influye en el confort térmico, el riesgo de incendios y la formación de nubes y niebla.",
+    "T2MDEW": "Mide el contenido real de humedad del aire y es clave para evaluar el estrés por calor húmedo.",
+    "TQV": "Es el combustible de la precipitación, y el vapor de agua es el principal gas de efecto invernadero natural.",
+    "WS10M": "El viento transporta calor y humedad, impulsa la evaporación y determina el potencial eólico.",
+    "WS50M": "Es la referencia para evaluar el recurso eólico a la altura de los aerogeneradores.",
+    "PS": "Sus variaciones definen los sistemas de tiempo: altas y bajas presiones, vientos y tormentas.",
+    "TO3": "La capa de ozono absorbe la radiación ultravioleta dañina; su recuperación se vigila desde el Protocolo de Montreal.",
+    "TROPPB": "La altura de la tropopausa responde al calentamiento de la troposfera y es una de las huellas del cambio climático.",
+    "AOD_55": "Los aerosoles afectan la salud, enfrían la superficie al reflejar la luz solar y modifican las nubes.",
+    "GPM_LLUVIA": "Es una observación de la precipitación independiente de los modelos, disponible incluso donde no hay pluviómetros.",
+    "GRACE_AGUA": "Es la única medición satelital del agua total almacenada en una región, incluida la subterránea.",
+    "MODIS_NDVI": "Refleja la cantidad y la salud de la vegetación: responde a sequías, deforestación, riego y cambios de uso del suelo.",
+}
 
 POR_CODIGO: dict[str, Variable] = {v.codigo: v for v in CATALOGO}

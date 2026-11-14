@@ -6,6 +6,7 @@ Para correrla:  .venv/bin/streamlit run app.py
 from __future__ import annotations
 
 import datetime as dt
+from html import escape
 from pathlib import Path
 
 import pandas as pd
@@ -50,6 +51,38 @@ COMPARACIONES = [
     ("Pekín y Monterrey: precipitación (satélite GPM)", 2, 0, "GPM_LLUVIA",
      "Dos ciudades con estrés hídrico. ¿En alguna está cambiando la precipitación?"),
 ]
+
+# Contraste de los ejemplos con estudios publicados: (sitio, variable) -> (texto, referencia).
+# Sin referencia significa que se buscó y no se encontró un estudio comparable.
+_AEROSOLES = ("Ratnam et al. (2021), con el instrumento MODIS del satélite Terra (2001–2018), encontraron un "
+              "aumento significativo de 0.1 AOD por década sobre India y una disminución de 0.1 AOD por "
+              "década sobre el este de China. El signo coincide con este análisis. Las magnitudes no son "
+              "directamente comparables: aquí se analiza un punto, otro periodo y un producto distinto.")
+CONTRASTES = {
+    ("Nueva Delhi, India", "GRACE_AGUA"): (
+        "Rodell, Velicogna y Famiglietti (2009) estimaron con GRACE una pérdida de agua subterránea de "
+        "4.0 ± 1.0 cm por año (unos 40 cm por década) entre 2002 y 2008 en Rajastán, Punyab y Haryana, "
+        "región que incluye Delhi. Con los datos de esta herramienta, el promedio regional (recuadro de "
+        "8°) da −3.8 cm por año en ese mismo periodo: dentro del margen del artículo. Las cifras no son "
+        "idénticas en definición: el artículo aísla el agua subterránea y aquí se mide el almacenamiento "
+        "total de agua.", "rodell2009"),
+    ("Nueva Delhi, India", "AOD_55"): (_AEROSOLES, "ratnam2021"),
+    ("Pekín, China", "AOD_55"): (_AEROSOLES, "ratnam2021"),
+    ("Monterrey, México", "GRACE_AGUA"): (
+        "No se encontró un estudio publicado que mida con GRACE esta tendencia para Monterrey o Nuevo "
+        "León. El resultado no está contrastado con la literatura y debe tomarse como exploratorio.", None),
+}
+
+
+def contraste_con_literatura(nombre_del_sitio: str, codigo: str) -> None:
+    """Muestra, para los sitios de ejemplo, qué dicen los estudios publicados sobre el mismo fenómeno."""
+    contraste = CONTRASTES.get((nombre_del_sitio, codigo))
+    if contraste is None:
+        return
+    texto, clave = contraste
+    cita = f" [{REFERENCIAS[clave].cita}]({REFERENCIAS[clave].url})" if clave else ""
+    st.markdown(f"**Contraste con la literatura.** {texto}{cita}")
+
 
 # Inicio guiado: tema de interés -> variable que se analiza primero (la primera de la lista
 # que se pueda medir en el sitio). La lista vacía deja la de mayor tendencia.
@@ -109,9 +142,11 @@ code, .et-mono { font-family: 'DM Mono', ui-monospace, Menlo, monospace; }
 
 
 def encabezado(eyebrow: str, titulo: str, lead: str = "", equipo: str = "") -> None:
-    parrafo = f'<p class="et-lead">{lead}</p>' if lead else ""
-    autoria = f'<div class="et-eyebrow et-equipo">{equipo}</div>' if equipo else ""
-    st.html(f'<div class="et-eyebrow">{eyebrow}</div>{autoria}<div class="et-titulo">{titulo}</div>{parrafo}')
+    # Los nombres de lugar vienen de un buscador externo: se escapan antes de insertarlos.
+    parrafo = f'<p class="et-lead">{escape(lead)}</p>' if lead else ""
+    autoria = f'<div class="et-eyebrow et-equipo">{escape(equipo)}</div>' if equipo else ""
+    st.html(f'<div class="et-eyebrow">{escape(eyebrow)}</div>{autoria}'
+            f'<div class="et-titulo">{escape(titulo)}</div>{parrafo}')
 
 
 def seccion(numero: int | None, titulo: str) -> None:
@@ -178,6 +213,13 @@ def cargar_mapa(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo
 
 
 @st.cache_data(show_spinner=False)
+def cargar_analisis_celda(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo,
+                          celda: str) -> caso.Interrogatorio:
+    cubo = _recortar(cargar_region(lat, lon, codigo, lado), periodo)
+    return caso.interrogar(cubo[celda], POR_CODIGO[codigo])
+
+
+@st.cache_data(show_spinner=False)
 def cargar_analisis_regional(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo) -> caso.Interrogatorio:
     promedio = region.promedio_regional(_recortar(cargar_region(lat, lon, codigo, lado), periodo))
     return caso.interrogar(promedio, POR_CODIGO[codigo])
@@ -239,8 +281,10 @@ def ficha_variable(v: Variable) -> None:
     st.markdown(f"`{v.codigo}` · {v.categoria} · {_tipo(v)}")
     st.markdown(f"**En pocas palabras.** {v.definicion}")
     st.markdown(f"**Definición técnica.** {v.tecnica}")
+    st.markdown(f"**Relevancia para el sistema Tierra.** {v.relevancia}")
     st.markdown(
         f"| Característica | Detalle |\n|---|---|\n"
+        f"| Nombre original | {v.nombre_original} |\n"
         f"| Unidad | {v.unidad} |\n"
         f"| Producto de datos | {v.producto} |\n"
         f"| Acceso | {v.fuente} |\n"
@@ -388,6 +432,9 @@ def pagina_variables() -> None:
     usadas = list(dict.fromkeys(clave for v in CATALOGO for clave in v.referencias))
     for clave in sorted(usadas, key=lambda c: REFERENCIAS[c].cita):
         st.markdown(f"- {REFERENCIAS[clave].cita} [{REFERENCIAS[clave].url}]({REFERENCIAS[clave].url})")
+    st.markdown("**Estudios con los que se contrastan los ejemplos**")
+    for clave in ("ratnam2021", "rodell2009"):
+        st.markdown(f"- {REFERENCIAS[clave].cita} [{REFERENCIAS[clave].url}]({REFERENCIAS[clave].url})")
     st.markdown("**Métodos estadísticos**")
     for clave in sorted(METODOS, key=lambda c: REFERENCIAS[c].cita):
         st.markdown(f"- {REFERENCIAS[clave].cita} [{REFERENCIAS[clave].url}]({REFERENCIAS[clave].url})")
@@ -428,8 +475,10 @@ def paso_sitio(sitio: dict, tabla_datos: pd.DataFrame) -> None:
     if not satelites:
         texto.caption("Las variables de satélite (GPM, MODIS, GRACE) no están disponibles: hace "
                       "falta una sesión de Google Earth Engine en esta computadora.")
-    texto.caption("Cada dato representa una celda de unos 50 km de lado alrededor del punto: "
-                  "describe el clima de la zona, no el de un sitio puntual.")
+    fecha = datos.fecha_de_datos(sitio["lat"], sitio["lon"], [v.codigo for v in CATALOGO if v.origen == "power"])
+    texto.caption("Cada dato representa un área alrededor del punto, no un sitio puntual: unos 50 km "
+                  "de lado en la mayoría de las variables, 100 km en aerosoles y 300 km en GRACE."
+                  + (f" Datos descargados de la fuente el {fecha:%d/%m/%Y}." if fecha else ""))
     mapa.map(pd.DataFrame({"lat": [sitio["lat"]], "lon": [sitio["lon"]]}), zoom=3, height=220)
 
 
@@ -483,12 +532,15 @@ def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = ()
     return codigo
 
 
-def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> int | None:
-    """Distribución espacial de la tendencia. Devuelve el lado del recuadro, o None si falló."""
+def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> tuple[int, str, str | None] | None:
+    """Distribución espacial de la tendencia.
+
+    Devuelve (lado del recuadro, serie que se analiza, celda elegida) o None si no hay mapa.
+    """
     v = POR_CODIGO[codigo]
     seccion(3, "Distribución espacial de la tendencia")
-    lado = st.radio("Tamaño de la región alrededor del sitio", [4, 8], index=1, horizontal=True,
-                    format_func=lambda g: f"{g}° × {g}° (unos {g * 111:,} km de lado)")
+    lado = st.slider("Tamaño de la región: lado del recuadro alrededor del sitio, en grados", 2, 10, 8, step=2,
+                     help="Un grado equivale a unos 111 km. La NASA entrega recuadros de 2° a 10°.")
     try:
         with st.spinner("Descargando los datos de la región..."):
             mapa = cargar_mapa(sitio["lat"], sitio["lon"], codigo, lado, periodo)
@@ -498,15 +550,32 @@ def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> int | None:
     if mapa.empty:
         st.info("Esta variable no se puede medir en ninguna celda de la región.")
         return None
+    lat_min, lat_max, lon_min, lon_max = datos.caja(sitio["lat"], sitio["lon"], lado)
     r = region.resumen(mapa)
-    texto = (f"**{v.nombre}** en {r['celdas']} celdas. La tendencia es positiva y significativa "
+    texto = (f"**{v.nombre}** en {r['celdas']} celdas con datos. La tendencia es positiva y significativa "
              f"en **{r['sube']:.0f} %** de la región, y negativa y significativa en **{r['baja']:.0f} %**.")
     if r["sube"] >= 5 and r["baja"] >= 5:
         texto += " **La misma variable presenta tendencias opuestas dentro de la región.**"
     st.markdown(texto)
-    plotly(graficas.mapa(mapa, v.unidad, sitio["lat"], sitio["lon"]))
+    st.caption(f"Recuadro de {lado}° × {lado}° (unos {lado * 111:,} km de lado): latitud {lat_min:g}° a {lat_max:g}°, "
+               f"longitud {lon_min:g}° a {lon_max:g}°. Resolución espacial de esta variable: {v.resolucion}.")
+
+    alcance = st.radio("Serie que se analiza", ["El punto", "El promedio de la región", "Una celda del mapa"],
+                       horizontal=True)
+    celda = None
+    if alcance == "Una celda del mapa":
+        orden = mapa.reindex(mapa["pendiente_decada"].abs().sort_values(ascending=False).index)
+        etiquetas = {f"{f.lat},{f.lon}": f"{f.lat:.2f}°, {f.lon:.2f}° · {caso.numero(f.pendiente_decada, signo=True)} "
+                                         f"{v.unidad} por década · {'significativa' if f.significativa else 'no significativa'}"
+                     for f in orden.itertuples()}
+        celda = st.selectbox("Celda (ordenadas de mayor a menor tendencia)", list(etiquetas),
+                             format_func=etiquetas.get)
+    marca = tuple(float(x) for x in celda.split(",")) if celda else None
+    plotly(graficas.mapa(mapa, v.unidad, sitio["lat"], sitio["lon"], celda=marca))
     st.caption("Rojo: tendencia positiva. Azul: negativa. El punto marca las celdas con tendencia "
-               "significativa tras el ajuste de Benjamini-Hochberg por comparaciones múltiples.")
+               "significativa tras el ajuste de Benjamini-Hochberg por comparaciones múltiples. Las zonas "
+               "sin color dentro del recuadro no tienen datos de esta variable (por ejemplo, variables "
+               "de suelo sobre el mar).")
     with st.expander("Ver como tabla"):
         st.dataframe(mapa, hide_index=True, width="stretch", column_config={
             "lat": "Latitud", "lon": "Longitud",
@@ -514,7 +583,7 @@ def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> int | None:
             "p": st.column_config.NumberColumn("p", format="%.3f"),
             "p_ajustada": st.column_config.NumberColumn("p ajustada", format="%.3f"),
             "significativa": "Significativa"})
-    return lado
+    return lado, alcance, celda
 
 
 def paso_serie(r: caso.Interrogatorio) -> None:
@@ -540,8 +609,10 @@ def paso_serie(r: caso.Interrogatorio) -> None:
         plotly(graficas.serie_original(r))
 
     st.markdown("**Pruebas de significancia.** Una tendencia visible en la gráfica puede deberse al "
-                "azar. Cada prueba se evalúa con un nivel de significancia α = 0.05, y la tendencia "
-                "se considera sólida solo si supera las cinco.")
+                "azar. Cada prueba da un valor p: la probabilidad de observar una tendencia al menos "
+                "tan marcada como esta si en realidad no hubiera ninguna. Cuanto más pequeño, menos "
+                "creíble es que sea casualidad. Una prueba se supera si p es menor que el nivel de "
+                "significancia α = 0.05, y la tendencia se considera sólida solo si supera las cinco.")
     for prueba in r.pruebas:
         with st.container(border=True):
             estado, detalle, ayuda = st.columns([1, 7, 2], vertical_alignment="center")
@@ -568,6 +639,12 @@ def paso_serie(r: caso.Interrogatorio) -> None:
                 "Si todo el triángulo tiene el mismo color, el signo de la tendencia no depende de "
                 "los años elegidos. La esquina superior izquierda es el periodo completo.")
     plotly(graficas.triangulo(r))
+    cambio = veredicto.cambio_de_comportamiento(r)
+    if cambio:
+        st.markdown(f"**Cambio de comportamiento.** {cambio}")
+        st.caption("Regresión en dos tramos sobre los promedios anuales: se busca el año que mejor "
+                   "divide la serie en dos rectas. Es un análisis exploratorio; no cuenta entre las "
+                   "cinco pruebas.")
 
 
 def _contraste_de_hipotesis(r: caso.Interrogatorio, hipotesis: str) -> str:
@@ -585,8 +662,8 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
     v = veredicto.redactar(r)
     u = r.variable.unidad
     with st.container(border=True):
-        st.html(f'<div class="et-eyebrow">{caso.NIVELES[r.nivel]}</div>'
-                f'<div class="et-resultado">{v.titular}</div>')
+        st.html(f'<div class="et-eyebrow">{escape(caso.NIVELES[r.nivel])}</div>'
+                f'<div class="et-resultado">{escape(v.titular)}</div>')
         a, b, c, d = st.columns(4)
         cifra(a, "Tasa de cambio", caso.numero(r.pendiente_decada, signo=True), f"{u} por década")
         cifra(b, "Cambio acumulado", caso.numero(r.cambio_total, signo=True), f"{u} en {r.anios_de_datos:.0f} años")
@@ -598,6 +675,8 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
             st.markdown(f"**Años de datos necesarios.** {v.espera}")
         if v.relevancia:
             st.markdown(f"**Relevancia práctica.** {v.relevancia}")
+        if v.no_lineal:
+            st.warning(f"**Tendencia no lineal.** {v.no_lineal}", icon=":material/warning:")
         if v.registro_corto:
             st.warning(f"**Registro corto.** {v.registro_corto}", icon=":material/warning:")
         if hipotesis:
@@ -645,6 +724,17 @@ tendencia, y en 79 a 98 de cada 100 cuando la tendencia existía (1,500 a 2,000 
 escenario; el código está en la carpeta `validacion/`).
 
 **Años de datos necesarios para detectar una tendencia.** Fórmula de Weatherhead et al. (1998).
+
+**Cambio de comportamiento.** Regresión lineal en dos tramos sobre los promedios anuales, con
+búsqueda del año de quiebre. Señala una inversión solo si los dos tramos son significativos
+(α = 0.025 cada uno) y de signo opuesto. En simulación, señaló inversiones falsas en menos de
+3 de cada 100 series.
+
+**Criterios propios del equipo.** Las pruebas y sus correcciones provienen de la literatura
+citada. Son decisiones de diseño de este proyecto, no estándares: la escala de evidencia (sólida
+= 5 pruebas, fuerte = 4, débil = 2 o 3), el umbral de 80 % en la sensibilidad al periodo, el
+mínimo de 15 años de datos, y los cortes de relevancia práctica (menos de 1, de 1 a 2 y más de
+2 desviaciones estándar interanuales). Su efecto conjunto se midió en la validación.
             """
         )
         st.page_link(PAGINAS["variables"], label="Referencias completas", icon=":material/arrow_forward:")
@@ -689,21 +779,26 @@ def pagina_analisis() -> None:
     planteada = next((c for c in preferidas if c in validas), validas[0]) if guiado else None
     hipotesis = guiado["hipotesis"] if guiado and codigo == planteada else None
 
-    lado = paso_mapa(sitio, codigo, periodo)
-    alcance = "El punto"
-    if lado is not None:
-        alcance = st.radio("Serie que se analiza", ["El punto", "El promedio de la región"], horizontal=True)
+    ejemplo = sitio["nombre"]
+    espacial = paso_mapa(sitio, codigo, periodo)
+    lado, alcance, celda = espacial if espacial else (None, "El punto", None)
     try:
         if alcance == "El punto":
             r = cargar_analisis(sitio["lat"], sitio["lon"], codigo, periodo)
-        else:
+        elif alcance == "El promedio de la región":
             r = cargar_analisis_regional(sitio["lat"], sitio["lon"], codigo, lado, periodo)
             sitio = {**sitio, "nombre": f"Región de {lado}° × {lado}° alrededor de {sitio['nombre']}"}
+        else:
+            r = cargar_analisis_celda(sitio["lat"], sitio["lon"], codigo, lado, periodo, celda)
+            lat_celda, lon_celda = (float(x) for x in celda.split(","))
+            sitio = {"nombre": f"Celda en {lat_celda:.2f}°, {lon_celda:.2f}°, cerca de {sitio['nombre']}",
+                     "lat": lat_celda, "lon": lon_celda}
     except caso.CasoImposible as error:
         st.warning(str(error))
         return
     paso_serie(r)
     paso_resultado(r, sitio, hipotesis)
+    contraste_con_literatura(ejemplo, codigo)
     metodo()
 
 
@@ -780,7 +875,11 @@ def pagina_comparacion() -> None:
 
     seccion(1, "Resultado")
     with st.container(border=True):
-        st.html(f'<div class="et-resultado">{veredicto.comparar(a, b, nombre_a, nombre_b)}</div>')
+        st.html(f'<div class="et-resultado">{escape(veredicto.comparar(a, b, nombre_a, nombre_b))}</div>')
+
+    contraste_con_literatura(nombre_a, codigo)
+    if CONTRASTES.get((nombre_b, codigo)) != CONTRASTES.get((nombre_a, codigo)):
+        contraste_con_literatura(nombre_b, codigo)
 
     seccion(2, "Series de tiempo")
     plotly(graficas.comparacion(a, b, nombre_a, nombre_b))

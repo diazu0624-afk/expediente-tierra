@@ -22,6 +22,7 @@ import pandas as pd
 from scipy import signal, stats
 
 ALFA = 0.05
+TOPE_CORRECCION = 0.15  # máximo que la corrección de sesgo puede sumar a la autocorrelación
 
 
 def quitar_ciclo_estacional(serie: pd.Series) -> tuple[pd.Series, pd.Series]:
@@ -35,8 +36,25 @@ def quitar_ciclo_estacional(serie: pd.Series) -> tuple[pd.Series, pd.Series]:
     return anomalias, climatologia
 
 
-def autocorrelacion_lag1(x: np.ndarray) -> float:
-    """Qué tanto se parece cada valor al anterior (la "memoria" de la serie), entre -1 y 1."""
+def pares_consecutivos(t: np.ndarray) -> np.ndarray:
+    """Marca qué datos son vecinos inmediatos en el tiempo.
+
+    Devuelve un arreglo de n-1 valores: True si t[k+1] sigue a t[k] sin hueco. Una serie
+    con meses o años faltantes (GRACE, por ejemplo) tiene pares que no son vecinos, y
+    tratarlos como tales falsea la autocorrelación.
+    """
+    t = np.asarray(t, dtype=float)
+    if t.size < 2:
+        return np.zeros(0, dtype=bool)
+    pasos = np.diff(t)
+    return pasos < 1.5 * np.median(pasos)
+
+
+def autocorrelacion_lag1(x: np.ndarray, pares: np.ndarray | None = None) -> float:
+    """Qué tanto se parece cada valor al anterior (la "memoria" de la serie), entre -1 y 1.
+
+    Con `pares` (ver `pares_consecutivos`) solo cuentan los datos que son vecinos reales.
+    """
     x = np.asarray(x, dtype=float)
     if x.size < 3:
         return 0.0
@@ -44,19 +62,30 @@ def autocorrelacion_lag1(x: np.ndarray) -> float:
     denominador = float(np.dot(d, d))
     if denominador == 0:
         return 0.0
-    return float(np.dot(d[:-1], d[1:]) / denominador)
+    productos = d[:-1] * d[1:]
+    if pares is None:
+        return float(productos.sum() / denominador)
+    if pares.sum() < 2:
+        return 0.0
+    # Se reescala para que, sin huecos, dé exactamente el estimador habitual.
+    return float(productos[pares].sum() / denominador * (x.size - 1) / pares.sum())
 
 
-def memoria_de_residuos(residuos: np.ndarray) -> float:
+def memoria_de_residuos(residuos: np.ndarray, pares: np.ndarray | None = None) -> float:
     """Autocorrelación lag 1 de los residuos de una recta, corregida por sesgo.
 
     Tras quitar una recta, la autocorrelación muestral subestima la real en
     (2 + 4·phi)/n; aquí se despeja phi. Importa en series cortas (anuales).
+
+    La corrección es una aproximación de primer orden y en series muy cortas se dispara,
+    así que se limita a sumar TOPE_CORRECCION como máximo. El límite solo actúa con menos
+    de unos 30 datos; ver validacion/series_cortas.py.
     """
     n = np.asarray(residuos).size
     if n < 6:
         return 0.0
-    return min((n * autocorrelacion_lag1(residuos) + 2) / (n - 4), 0.98)
+    cruda = autocorrelacion_lag1(residuos, pares)
+    return min((n * cruda + 2) / (n - 4), cruda + TOPE_CORRECCION, 0.98)
 
 
 @dataclass(frozen=True)
@@ -129,24 +158,26 @@ def mann_kendall_sin_memoria(t: np.ndarray, y: np.ndarray, max_iter: int = 30) -
     que conserva la pendiente y deja el ruido del tamaño que de verdad estorba. Como r1
     y la pendiente dependen una de la otra, se estiman por turnos hasta que se
     estabilizan. Solo se corrige la memoria positiva, que es la que infla los falsos
-    positivos.
+    positivos. Si la serie tiene huecos, w solo se calcula entre datos consecutivos.
     """
     t = np.asarray(t, dtype=float)
     y = np.asarray(y, dtype=float)
+    pares = pares_consecutivos(t)
+    t_w = t[1:][pares]
     pendiente = _mediana_de_pendientes(t, y)
-    r1 = memoria_de_residuos(y - pendiente * t)
-    if r1 <= 0:
+    r1 = memoria_de_residuos(y - pendiente * t, pares)
+    if r1 <= 0 or pares.sum() < 3:
         return MannKendallSinMemoria(mann_kendall(y), r1, False)
     for _ in range(max_iter):
-        w = (y[1:] - r1 * y[:-1]) / (1 - r1)
-        nueva_pendiente = _mediana_de_pendientes(t[1:], w)
-        nuevo_r1 = min(max(memoria_de_residuos(y - nueva_pendiente * t), 1e-6), 0.98)
+        w = ((y[1:] - r1 * y[:-1]) / (1 - r1))[pares]
+        nueva_pendiente = _mediana_de_pendientes(t_w, w)
+        nuevo_r1 = min(max(memoria_de_residuos(y - nueva_pendiente * t, pares), 1e-6), 0.98)
         estable = (abs(nuevo_r1 - r1) < 1e-4
                    and abs(nueva_pendiente - pendiente) <= 1e-4 * abs(pendiente) + 1e-12)
         pendiente, r1 = nueva_pendiente, nuevo_r1
         if estable:
             break
-    w = (y[1:] - r1 * y[:-1]) / (1 - r1)
+    w = ((y[1:] - r1 * y[:-1]) / (1 - r1))[pares]
     return MannKendallSinMemoria(mann_kendall(w), r1, True)
 
 
@@ -161,6 +192,7 @@ class Regresion:
     p: float
     ic_bajo: float
     ic_alto: float
+    r2: float  # fracción de la variación de los datos que explica la recta
 
 
 def regresion_lineal(t: np.ndarray, y: np.ndarray) -> Regresion:
@@ -179,12 +211,14 @@ def regresion_lineal(t: np.ndarray, y: np.ndarray) -> Regresion:
     intercepto = float(y.mean() - pendiente * t.mean())
     residuos = y - (intercepto + pendiente * t)
     sse = float(np.dot(residuos, residuos))
-    r1 = memoria_de_residuos(residuos)
+    total = float(np.dot(y - y.mean(), y - y.mean()))
+    r2 = 1 - sse / total if total > 0 else 0.0
+    r1 = memoria_de_residuos(residuos, pares_consecutivos(t))
     n_ef = max(n * (1 - r1) / (1 + r1), 3.0) if r1 > 0 else float(n)
 
     if sse == 0:  # ajuste perfecto: no hay incertidumbre que estimar
         p = 0.0 if pendiente != 0 else 1.0
-        return Regresion(pendiente, intercepto, p, r1, n, n_ef, p, pendiente, pendiente)
+        return Regresion(pendiente, intercepto, p, r1, n, n_ef, p, pendiente, pendiente, r2)
 
     def _p_y_error(grados: float) -> tuple[float, float]:
         error = sqrt(sse / grados / sxx)
@@ -194,7 +228,7 @@ def regresion_lineal(t: np.ndarray, y: np.ndarray) -> Regresion:
     p, error = _p_y_error(n_ef - 2)
     margen = float(stats.t.ppf(1 - ALFA / 2, n_ef - 2)) * error
     return Regresion(pendiente, intercepto, p_ingenuo, r1, n, n_ef, p,
-                     pendiente - margen, pendiente + margen)
+                     pendiente - margen, pendiente + margen, r2)
 
 
 def ic_historias_alternativas(
@@ -213,13 +247,19 @@ def ic_historias_alternativas(
     sxx = float(np.dot(tc, tc))
     pendiente = float(np.dot(tc, y - y.mean()) / sxx)
     residuos = (y - y.mean()) - pendiente * tc
-    phi = max(memoria_de_residuos(residuos), 0.0)
-    sobresaltos = residuos[1:] - phi * residuos[:-1]
+    pares = pares_consecutivos(t)
+    phi = max(memoria_de_residuos(residuos, pares), 0.0)
+    sobresaltos = (residuos[1:] - phi * residuos[:-1])[pares]
+    if sobresaltos.size < 3:  # casi ningún dato tiene vecino: no hay memoria que estimar
+        phi, sobresaltos = 0.0, residuos
     sobresaltos = sobresaltos - sobresaltos.mean()
+    # Las series simuladas son continuas; después se toman solo los instantes observados,
+    # para que un hueco en los datos sea también un hueco en la simulación.
+    posiciones = np.rint((t - t[0]) / np.median(np.diff(t))).astype(int)
     rng = np.random.default_rng(semilla)
     calentamiento = 100  # pasos descartados para que el arranque no influya
-    sorteo = rng.choice(sobresaltos, size=(repeticiones, n + calentamiento))
-    ruido = signal.lfilter([1.0], [1.0, -phi], sorteo, axis=1)[:, calentamiento:]
+    sorteo = rng.choice(sobresaltos, size=(repeticiones, posiciones[-1] + 1 + calentamiento))
+    ruido = signal.lfilter([1.0], [1.0, -phi], sorteo, axis=1)[:, calentamiento:][:, posiciones]
     pendientes = pendiente + ruido @ tc / sxx
     bajo, alto = np.quantile(pendientes, [ALFA / 2, 1 - ALFA / 2])
     return float(bajo), float(alto)
@@ -277,3 +317,48 @@ def benjamini_hochberg(p: np.ndarray) -> np.ndarray:
     resultado = np.empty(m)
     resultado[orden] = np.minimum(ajustados, 1.0)
     return resultado
+
+
+@dataclass(frozen=True)
+class PuntoDeCambio:
+    anio: int  # último año del primer tramo
+    antes: Regresion  # tendencia hasta `anio`
+    despues: Regresion  # tendencia después de `anio`
+    mejora: float  # fracción del error de la recta única que desaparece al usar dos tramos
+
+    @property
+    def cambia_de_signo(self) -> bool:
+        """La tendencia se invierte: los dos tramos son significativos y van en sentidos opuestos.
+
+        Como el año de quiebre se elige mirando los datos, a cada tramo se le exige la
+        mitad del nivel de significancia habitual.
+        """
+        return (self.antes.p < ALFA / 2 and self.despues.p < ALFA / 2
+                and np.sign(self.antes.pendiente) != np.sign(self.despues.pendiente))
+
+
+def punto_de_cambio(anios: np.ndarray, valores: np.ndarray, margen: int = 6) -> PuntoDeCambio | None:
+    """Regresión en dos tramos: ¿en qué año cambia más el comportamiento de la serie?
+
+    Prueba cada año como punto de quiebre, ajusta una recta antes y otra después, y se
+    queda con el año que deja el menor error total. Sirve para detectar tendencias que
+    se aceleran, se frenan o se invierten, que una sola recta describe mal. Cada tramo
+    conserva al menos `margen` años. Devuelve None si la serie es demasiado corta.
+    """
+    anios = np.asarray(anios, dtype=float)
+    valores = np.asarray(valores, dtype=float)
+    n = valores.size
+    if n < 2 * margen:
+        return None
+
+    def error(t: np.ndarray, y: np.ndarray) -> float:
+        residuos = y - np.polyval(np.polyfit(t, y, 1), t)
+        return float(np.dot(residuos, residuos))
+
+    cortes = range(margen, n - margen + 1)  # el primer tramo es [0, corte)
+    errores = [error(anios[:c], valores[:c]) + error(anios[c:], valores[c:]) for c in cortes]
+    corte = cortes[int(np.argmin(errores))]
+    unica = error(anios, valores)
+    mejora = 1 - min(errores) / unica if unica > 0 else 0.0
+    return PuntoDeCambio(int(anios[corte - 1]), regresion_lineal(anios[:corte], valores[:corte]),
+                         regresion_lineal(anios[corte:], valores[corte:]), mejora)
