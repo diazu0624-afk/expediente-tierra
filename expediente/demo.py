@@ -96,8 +96,8 @@ PLANTILLA = r"""<!doctype html>
 <title>Expediente Tierra: recorrido</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@600;700;800&family=Public+Sans:wght@400;500;600&display=swap');
-:root { --tinta:#0b0b0b; --tinta2:#52514e; --tenue:#898781; --filete:#d9d8d2; --fondo:#ffffff; --plano:#f4f4f2;
-  --acento:#0b3d91; --azul:#2a78d6; --rojo:#e34948; --naranja:#eb6834; --suave:cubic-bezier(.16,1,.3,1); }
+:root { --k:.5; /* factor que comprime todos los retrasos de las animaciones */ --tinta:#0b0b0b; --tinta2:#52514e; --tenue:#898781; --filete:#d9d8d2; --fondo:#ffffff; --plano:#f4f4f2;
+  --acento:#0b3d91; --azul:#2a78d6; --rojo:#e34948; --naranja:#eb6834; --suave:cubic-bezier(.16,1,.3,1); --transito:cubic-bezier(.65,0,.35,1); }
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; background: var(--fondo); overflow: hidden; }
 body { font-family: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--tinta); }
@@ -116,8 +116,11 @@ p.lead { font-size: 34px; line-height: 1.38; color: var(--tinta2); max-width: 11
 .avance i { display: block; height: 100%; width: 0; background: var(--tinta); }
 
 /* escenas */
-.escena { position: absolute; inset: 0; padding: 150px 96px 80px; opacity: 0; visibility: hidden; transition: opacity .55s var(--suave), visibility 0s .55s; }
-.escena.activa { opacity: 1; visibility: visible; transition: opacity .55s var(--suave); }
+.escena { position: absolute; inset: 0; padding: 150px 96px 80px; opacity: 0; pointer-events: none; transform: translateY(46px);
+  transition: opacity .85s var(--transito), transform .85s var(--transito); will-change: opacity, transform; }
+.escena.activa { opacity: 1; transform: none; }
+.escena.saliente { opacity: 0; transform: translateY(-46px); }
+.atras .escena { transform: translateY(-46px); } .atras .escena.activa { transform: none; } .atras .escena.saliente { transform: translateY(46px); }
 .escena .cab { border-top: 3px solid var(--tinta); padding-top: 22px; display: flex; gap: 26px; align-items: baseline; margin-bottom: 30px; }
 .escena .cab .n { font: 400 24px 'DM Mono', monospace; color: var(--tinta2); }
 .escena .cab h2 { font-size: 62px; }
@@ -125,17 +128,16 @@ p.lead { font-size: 34px; line-height: 1.38; color: var(--tinta2); max-width: 11
 
 /* animaciones: solo corren en la escena activa; --d es el retraso */
 .escena .a { opacity: 0; }
-.escena.activa .a { animation: sube .9s var(--suave) both; animation-delay: var(--d, 0s); }
-.escena.activa .crece { animation: crece 1.1s var(--suave) both; animation-delay: var(--d, 0s); transform-origin: var(--origen, left) center; }
-.escena.activa .traza { stroke-dasharray: 1; stroke-dashoffset: 1; animation: traza var(--t, 2.2s) cubic-bezier(.4,0,.2,1) both; animation-delay: var(--d, 0s); }
-.escena.activa .funde { animation: funde .9s ease both; animation-delay: var(--d, 0s); }
+.escena.activa .a { animation: sube .8s var(--suave) both; animation-delay: calc(var(--d, 0s) * var(--k) + .3s); }
+.escena.activa .crece { animation: crece .8s var(--suave) both; animation-delay: calc(var(--d, 0s) * var(--k) + .3s); transform-origin: var(--origen, left) center; }
+.escena.activa .traza { stroke-dasharray: 1; stroke-dashoffset: 1; animation: traza calc(var(--t, 2.2s) * var(--k)) cubic-bezier(.4,0,.2,1) both; animation-delay: calc(var(--d, 0s) * var(--k) + .3s); }
+.escena.activa .funde { animation: funde .7s ease both; animation-delay: calc(var(--d, 0s) * var(--k) + .3s); }
 .escena .crece { transform: scaleX(0); } .escena .funde { opacity: 0; }
-@keyframes sube { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: none; } }
+@keyframes sube { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
 @keyframes crece { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes traza { to { stroke-dashoffset: 0; } }
 @keyframes funde { from { opacity: 0; } to { opacity: 1; } }
 @keyframes marca { 0%,100% { transform: scale(1); } 50% { transform: scale(.96); } }
-.pausa .escena.activa * { animation-play-state: paused !important; }
 
 /* 1 y 11: portada y cierre */
 .portada { display: flex; flex-direction: column; justify-content: center; padding-top: 80px; }
@@ -160,13 +162,13 @@ p.lead { font-size: 34px; line-height: 1.38; color: var(--tinta2); max-width: 11
 .opcion { display: flex; align-items: center; gap: 16px; font-size: 27px; padding: 8px 0; color: var(--tinta); }
 .opcion i { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--tenue); display: grid; place-items: center; flex: none; }
 .opcion i::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--acento); transform: scale(0); }
-.escena.activa .opcion.sel i { animation: borde .01s linear both; animation-delay: var(--d); }
-.escena.activa .opcion.sel i::after { animation: punto .5s var(--suave) both; animation-delay: var(--d); }
+.escena.activa .opcion.sel i { animation: borde .01s linear both; animation-delay: calc(var(--d) * var(--k) + .3s); }
+.escena.activa .opcion.sel i::after { animation: punto .45s var(--suave) both; animation-delay: calc(var(--d) * var(--k) + .3s); }
 @keyframes borde { to { border-color: var(--acento); } }
 @keyframes punto { to { transform: scale(1); } }
 .selector { border: 1.5px solid var(--filete); background: var(--plano); padding: 16px 20px; font-size: 27px; display: flex; justify-content: space-between; }
 .boton { display: inline-block; margin-top: 40px; background: var(--acento); color: #fff; font: 600 28px 'Public Sans', sans-serif; padding: 20px 34px; }
-.escena.activa .boton.pulsa { animation: sube .9s var(--suave) both, marca .5s ease 1; animation-delay: var(--d), calc(var(--d) + 1.6s); }
+.escena.activa .boton.pulsa { animation: sube .8s var(--suave) both, marca .45s ease 1; animation-delay: calc(var(--d) * var(--k) + .3s), calc(var(--d) * var(--k) + 1.2s); }
 
 /* 4: exploración */
 .barras { display: grid; grid-template-columns: 560px 1fr; column-gap: 28px; row-gap: 15px; align-items: center; margin-top: 8px; }
@@ -216,32 +218,36 @@ svg text.rotulo { font-size: 23px; fill: var(--tinta); }
 .hoja .l.t { height: 22px; background: var(--tinta); width: 82%; margin: 14px 0 22px; }
 .hoja .l.c { width: 60%; } .hoja .l.m { width: 38%; height: 7px; }
 .hoja .regla { border-top: 2.5px solid var(--tinta); margin: 22px 0 16px; }
-.escena.activa .hoja { animation: hoja 1.2s var(--suave) both; animation-delay: var(--d); }
+.escena.activa .hoja { animation: hoja 1s var(--suave) both; animation-delay: calc(var(--d) * var(--k) + .3s); }
 @keyframes hoja { from { opacity: 0; transform: translateY(90px) rotate(0deg); } to { opacity: 1; transform: translateY(0) rotate(var(--giro, 0deg)); } }
 .lista { list-style: none; padding: 0; margin-top: 34px; }
 .lista li { font-size: 31px; padding: 15px 0; border-top: 1.5px solid var(--filete); }
 
-/* controles */
-#controles { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; background: rgba(11,11,11,.88);
-  padding: 8px 10px; z-index: 20; transition: opacity .4s; }
-#controles button { font: 500 14px 'Public Sans', system-ui, sans-serif; color: #fff; background: transparent; border: 1px solid rgba(255,255,255,.35); padding: 7px 14px; cursor: pointer; }
-#controles button:hover { background: rgba(255,255,255,.14); }
-#controles span { font: 400 12px 'DM Mono', monospace; color: rgba(255,255,255,.75); padding: 0 8px; min-width: 190px; }
-#controles.oculto { opacity: 0; pointer-events: none; }
+/* controles: barra fija bajo el lienzo; con ?grabar=1 no existe */
+#controles { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; display: flex; gap: 8px; align-items: center; padding: 0 16px; background: var(--tinta); z-index: 20; }
+#controles button { font: 500 14px 'Public Sans', system-ui, sans-serif; color: #fff; background: transparent; border: 1px solid rgba(255,255,255,.35); padding: 7px 14px; cursor: pointer; white-space: nowrap; }
+#controles button:hover, #controles button:focus-visible { background: rgba(255,255,255,.16); outline: none; }
+#controles button.principal { background: #fff; color: var(--tinta); border-color: #fff; min-width: 104px; }
+#tramos { flex: 1; display: flex; gap: 4px; height: 56px; align-items: center; margin: 0 8px; }
+#tramos button { flex: 1; height: 26px; padding: 0; border: 0; background: transparent; position: relative; }
+#tramos button::before { content: ""; position: absolute; left: 0; right: 0; top: 10px; height: 6px; background: rgba(255,255,255,.28); }
+#tramos button i { position: absolute; left: 0; top: 10px; height: 6px; width: 0; background: #fff; }
+#tramos button:hover::before { background: rgba(255,255,255,.5); }
+#rotulo { font: 400 12px 'DM Mono', monospace; color: rgba(255,255,255,.8); min-width: 250px; text-align: right; }
 @media (prefers-reduced-motion: reduce) { .escena.activa .a, .escena.activa .crece, .escena.activa .funde, .escena.activa .traza, .escena.activa .hoja { animation-duration: .01s !important; animation-delay: 0s !important; } }
 </style></head>
 <body>
 <div id="marco"><div id="lienzo">
   <div class="marca">Expediente Tierra</div><div class="contador" id="contador"></div>
 
-  <section class="escena portada" data-dur="5.5" data-nombre="Portada">
+  <section class="escena portada" data-dur="5" data-nombre="Portada">
     <div class="eyebrow a">NASA Space Apps 2026 · Earth System Trend Detective</div>
     <div class="eyebrow a" style="--d:.15s;color:var(--tinta);margin-top:10px">Equipo C15H25N3O</div>
     <h1 class="a" style="--d:.35s">Expediente<br>Tierra</h1>
     <p class="lead a" style="--d:.75s">Herramienta para detectar tendencias en variables terrestres.</p>
   </section>
 
-  <section class="escena" data-dur="10" data-nombre="El problema">
+  <section class="escena" data-dur="5" data-nombre="El problema">
     <div class="cab a"><span class="n">01</span><h2>Una gráfica que sube no prueba una tendencia</h2></div>
     <p class="lead a" style="--d:.5s">Los datos del clima tienen autocorrelación: cada mes se parece al anterior. La prueba clásica lo ignora y encuentra tendencias donde no las hay.</p>
     <div class="medidor">
@@ -253,7 +259,7 @@ svg text.rotulo { font-size: 23px; fill: var(--tinta); }
     <p class="nota a" style="--d:5.6s">Medido con miles de series sintéticas sin tendencia. Cinco pruebas, todas corregidas por autocorrelación.</p>
   </section>
 
-  <section class="escena" data-dur="9.5" data-nombre="Empezar un análisis">
+  <section class="escena" data-dur="5" data-nombre="Empezar un análisis">
     <div class="cab a"><span class="n">02</span><h2>Empezar un análisis</h2></div>
     <p class="lead a" style="--d:.4s;margin-bottom:40px">Tres preguntas: qué te interesa, dónde, y qué esperas encontrar.</p>
     <div class="tarjeta a" style="--d:.9s">
@@ -274,14 +280,14 @@ svg text.rotulo { font-size: 23px; fill: var(--tinta); }
     <div class="boton pulsa" style="--d:6.2s">Iniciar el análisis</div>
   </section>
 
-  <section class="escena" data-dur="10" data-nombre="Exploración de variables">
+  <section class="escena" data-dur="5" data-nombre="Exploración de variables">
     <div class="cab a"><span class="n">03</span><h2>Exploración de variables</h2></div>
     <p class="lead a" style="--d:.4s;margin-bottom:26px"><span id="n-variables"></span> variables de la NASA, ordenadas por la magnitud de su tendencia.</p>
     <div class="barras" id="barras"></div>
     <p class="nota a" style="--d:6.2s">Cada tendencia se mide contra la variabilidad normal de esa variable, para comparar grados con milímetros. Tono fuerte: significativa.</p>
   </section>
 
-  <section class="escena" data-dur="10" data-nombre="Distribución espacial">
+  <section class="escena" data-dur="5" data-nombre="Distribución espacial">
     <div class="cab a"><span class="n">04</span><h2>Distribución espacial</h2></div>
     <div class="dos" style="grid-template-columns: 780px 1fr">
       <div class="a" style="--d:.5s"><svg id="mapa" viewBox="0 0 620 620" width="720" height="720"></svg>
@@ -293,20 +299,20 @@ svg text.rotulo { font-size: 23px; fill: var(--tinta); }
     </div>
   </section>
 
-  <section class="escena" data-dur="10.5" data-nombre="Serie de tiempo">
+  <section class="escena" data-dur="5" data-nombre="Serie de tiempo">
     <div class="cab a"><span class="n">05</span><h2>Serie de tiempo</h2></div>
     <div class="leyenda a" style="--d:.5s"><span><i style="border-color:#c3c2b7;border-top-width:2px"></i>Anomalía mensual</span><span><i style="border-color:var(--azul)"></i>Media móvil de 12 meses</span><span><i style="border-color:var(--tinta)"></i>Tendencia lineal</span><span><i class="banda"></i>Intervalo de confianza del 95 %</span></div>
     <svg id="serie" viewBox="0 0 1728 640" width="1728" height="640"></svg>
     <p class="nota a" style="--d:6.6s;margin-top:6px">Sin el ciclo de las estaciones queda el cambio de fondo: almacenamiento de agua terrestre medido por los satélites GRACE.</p>
   </section>
 
-  <section class="escena" data-dur="10" data-nombre="Pruebas de significancia">
+  <section class="escena" data-dur="5" data-nombre="Pruebas de significancia">
     <div class="cab a"><span class="n">06</span><h2>Pruebas de significancia</h2></div>
     <p class="lead a" style="--d:.4s;margin-bottom:30px">Una tendencia visible puede ser casualidad. Solo la que supera las cinco es sólida.</p>
     <div id="pruebas"></div>
   </section>
 
-  <section class="escena" data-dur="11.5" data-nombre="Resultado">
+  <section class="escena" data-dur="5" data-nombre="Resultado">
     <div class="cab a"><span class="n">07</span><h2>Resultado</h2></div>
     <div class="eyebrow a" style="--d:.4s" id="res-etiqueta"></div>
     <div class="titular a" style="--d:.55s" id="res-titular"></div>
@@ -322,14 +328,14 @@ svg text.rotulo { font-size: 23px; fill: var(--tinta); }
     </div>
   </section>
 
-  <section class="escena" data-dur="10" data-nombre="Comparación de dos lugares">
+  <section class="escena" data-dur="5" data-nombre="Comparación de dos lugares">
     <div class="cab a"><span class="n">08</span><h2>Tendencias opuestas</h2></div>
     <div class="leyenda a" style="--d:.5s"><span><i style="border-color:var(--azul)"></i><span id="cmp-a"></span></span><span><i style="border-color:var(--naranja)"></i><span id="cmp-b"></span></span></div>
     <svg id="comparacion" viewBox="0 0 1728 600" width="1728" height="600"></svg>
     <p class="nota a" style="--d:6s;margin-top:6px">La misma variable en dos lugares: el espesor óptico de aerosoles aumenta en Delhi y disminuye en Pekín.</p>
   </section>
 
-  <section class="escena" data-dur="9" data-nombre="Informe">
+  <section class="escena" data-dur="5" data-nombre="Informe">
     <div class="cab a"><span class="n">09</span><h2>Informe descargable</h2></div>
     <div class="dos">
       <div>
@@ -350,7 +356,7 @@ svg text.rotulo { font-size: 23px; fill: var(--tinta); }
     </div>
   </section>
 
-  <section class="escena portada" data-dur="7" data-nombre="Cierre">
+  <section class="escena portada" data-dur="5" data-nombre="Cierre">
     <div class="eyebrow a">NASA Space Apps 2026 · Equipo C15H25N3O</div>
     <h1 class="a" style="--d:.3s;font-size:150px">Expediente Tierra</h1>
     <p class="lead a" style="--d:.7s">Qué cambia, dónde, cuánto, y si el cambio es significativo.</p>
@@ -364,7 +370,7 @@ svg text.rotulo { font-size: 23px; fill: var(--tinta); }
 
   <div class="avance"><i id="avance"></i></div>
 </div></div>
-<div id="controles"><button id="b-pausa">Pausa</button><button id="b-reinicio">Reiniciar</button><button id="b-antes">Anterior</button><button id="b-despues">Siguiente</button><span id="rotulo"></span></div>
+<div id="controles"><button id="b-antes" aria-label="Escena anterior">Anterior</button><button id="b-pausa" class="principal">Pausa</button><button id="b-despues" aria-label="Escena siguiente">Siguiente</button><div id="tramos" aria-label="Escenas"></div><button id="b-reinicio">Reiniciar</button><span id="rotulo"></span></div>
 
 <script>
 const D = __DATOS__;
@@ -482,55 +488,69 @@ D.pruebas.forEach((p, k) => {
 });
 
 // ---- línea de tiempo
+const K = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--k")) || 1;
 const escenas = [...document.querySelectorAll(".escena")], duraciones = escenas.map(e => +e.dataset.dur * 1000), total = duraciones.reduce((a, b) => a + b, 0);
-let actual = -1, transcurrido = 0, anterior = null, pausado = !AUTO, terminado = false, iniciado = AUTO;
+const inicios = duraciones.map((_, i) => duraciones.slice(0, i).reduce((a, b) => a + b, 0));
+let actual = -1, transcurrido = 0, anterior = null, pausado = !AUTO, terminado = false;
+
+// Una barra por escena: muestra el avance y sirve para saltar a cualquiera.
+const tramos = escenas.map((e, i) => { const b = document.createElement("button"); b.title = e.dataset.nombre; b.setAttribute("aria-label", "Ir a: " + e.dataset.nombre);
+  b.innerHTML = "<i></i>"; b.onclick = () => irA(i); $("tramos").appendChild(b); return b.firstChild; });
+
 function contar(escena) {
   escena.querySelectorAll("[data-cuenta]").forEach(n => {
-    const meta = +n.dataset.valor, retraso = (parseFloat(getComputedStyle(n.closest(".a")).getPropertyValue("--d")) || 0) * 1000, inicio = performance.now() + retraso;
+    const meta = +n.dataset.valor, retraso = (parseFloat(getComputedStyle(n.closest(".a")).getPropertyValue("--d")) || 0) * 1000 * K + 300, inicio = performance.now() + retraso;
     n.textContent = "0";
-    const paso = (ahora) => { if (!escena.classList.contains("activa")) return; const f = Math.min(Math.max((ahora - inicio) / 1500, 0), 1), s = 1 - Math.pow(1 - f, 3);
+    const paso = (ahora) => { if (!escena.classList.contains("activa")) return; const f = Math.min(Math.max((ahora - inicio) / 1000, 0), 1), s = 1 - Math.pow(1 - f, 3);
       n.textContent = menos((meta > 0 && n.id !== "mapa-baja" ? "+" : "") + Math.round(meta * s)); if (f < 1) requestAnimationFrame(paso); };
     requestAnimationFrame(paso);
   });
 }
 function mostrar(i) {
-  if (i === actual) return; actual = i;
-  escenas.forEach((e, k) => e.classList.toggle("activa", k === i));
+  if (i === actual) return;
+  const previa = escenas[actual];
+  $("lienzo").classList.toggle("atras", actual > i);  // al retroceder, el movimiento se invierte
+  escenas.forEach(e => e.classList.remove("saliente"));
+  if (previa) { previa.classList.remove("activa"); previa.classList.add("saliente"); setTimeout(() => previa.classList.remove("saliente"), 900); }
+  actual = i;
+  void escenas[i].offsetWidth;  // reinicia las animaciones de la escena aunque ya se haya visto
+  escenas[i].classList.add("activa");
   $("contador").textContent = String(i + 1).padStart(2, "0") + " / " + String(escenas.length).padStart(2, "0");
   $("rotulo").textContent = (i + 1) + " de " + escenas.length + " · " + escenas[i].dataset.nombre;
   contar(escenas[i]);
 }
-function irA(i) { i = Math.min(Math.max(i, 0), escenas.length - 1); transcurrido = duraciones.slice(0, i).reduce((a, b) => a + b, 0); terminado = false; actual = -1; mostrar(i); }
+function irA(i) { i = Math.min(Math.max(i, 0), escenas.length - 1); transcurrido = inicios[i]; terminado = false; mostrar(i); pintar(); estado(); }
+function pintar() {
+  $("avance").style.width = (100 * transcurrido / total) + "%";
+  tramos.forEach((t, i) => { t.style.width = (100 * Math.min(Math.max((transcurrido - inicios[i]) / duraciones[i], 0), 1)) + "%"; });
+}
 function cuadro(ahora) {
   if (anterior !== null && !pausado && !terminado) transcurrido += ahora - anterior;
   anterior = ahora;
   if (transcurrido >= total) { transcurrido = total; terminado = true; pausado = true; estado(); }
-  let acumulado = 0, i = 0; while (i < escenas.length - 1 && transcurrido >= acumulado + duraciones[i]) acumulado += duraciones[i++];
-  mostrar(i); $("avance").style.width = (100 * transcurrido / total) + "%";
+  let i = escenas.length - 1; while (i > 0 && transcurrido < inicios[i]) i--;
+  mostrar(i); pintar();
   requestAnimationFrame(cuadro);
 }
-// Antes de la primera reproducción la portada se anima completa y queda como imagen fija.
-function estado() { document.body.classList.toggle("pausa", pausado && iniciado && !terminado); $("b-pausa").textContent = terminado ? "Ver de nuevo" : pausado ? "Reproducir" : "Pausa"; }
-function alternar() { if (terminado) { irA(0); pausado = false; } else pausado = !pausado; iniciado = true; estado(); }
+// Pausar detiene el paso de una escena a la siguiente; la escena en pantalla termina de dibujarse.
+function estado() { $("b-pausa").textContent = terminado ? "Ver de nuevo" : pausado ? "Reproducir" : "Pausa"; }
+function alternar() { if (terminado) { irA(0); pausado = false; } else pausado = !pausado; estado(); }
 $("b-pausa").onclick = alternar;
-$("b-reinicio").onclick = () => { irA(0); pausado = false; iniciado = true; estado(); };
+$("b-reinicio").onclick = () => { irA(0); pausado = false; estado(); };
 $("b-antes").onclick = () => irA(actual - 1);
 $("b-despues").onclick = () => irA(actual + 1);
-document.addEventListener("keydown", (e) => { if (e.code === "Space") { e.preventDefault(); alternar(); } if (e.code === "ArrowRight") irA(actual + 1); if (e.code === "ArrowLeft") irA(actual - 1); });
+document.addEventListener("keydown", (e) => { if (e.code === "Space") { e.preventDefault(); alternar(); } if (e.code === "ArrowRight") irA(actual + 1); if (e.code === "ArrowLeft") irA(actual - 1); if (e.code === "Home") irA(0); });
 
-// ---- escala: el lienzo de 1920 × 1080 se ajusta a la ventana
-function ajustar() { const k = Math.min(innerWidth / 1920, innerHeight / 1080), l = $("lienzo");
-  l.style.transform = `translate(${(innerWidth - 1920 * k) / 2}px, ${(innerHeight - 1080 * k) / 2}px) scale(${k})`; }
+// ---- escala: el lienzo de 1920 × 1080 se ajusta al espacio que deja la barra de controles
+const parametros = new URLSearchParams(location.search), grabando = parametros.has("grabar");
+if (grabando) $("controles").style.display = "none";
+function ajustar() { const alto = innerHeight - (grabando ? 0 : 56), k = Math.min(innerWidth / 1920, alto / 1080), l = $("lienzo");
+  l.style.transform = `translate(${(innerWidth - 1920 * k) / 2}px, ${(alto - 1080 * k) / 2}px) scale(${k})`; }
 addEventListener("resize", ajustar); ajustar();
 
-// ---- controles: se esconden solos; con ?grabar=1 no aparecen nunca
-const parametros = new URLSearchParams(location.search), controles = $("controles"); let reloj;
-if (parametros.has("grabar")) controles.style.display = "none";
-function asomar() { controles.classList.remove("oculto"); clearTimeout(reloj); reloj = setTimeout(() => { if (!pausado) controles.classList.add("oculto"); }, 2200); }
-addEventListener("mousemove", asomar); asomar();
-if (parametros.has("escena")) { irA(+parametros.get("escena") - 1); } else mostrar(0);
+if (parametros.has("escena")) irA(+parametros.get("escena") - 1); else mostrar(0);
 estado();
-(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => setTimeout(() => requestAnimationFrame(cuadro), AUTO ? 900 : 0));
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => setTimeout(() => requestAnimationFrame(cuadro), AUTO ? 700 : 0));
 </script>
 </body></html>
 """

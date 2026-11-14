@@ -323,8 +323,8 @@ def pagina_inicio() -> None:
     recorrido = RAIZ / "static" / "demo.html"
     if recorrido.exists():
         seccion(1, "Recorrido de la herramienta")
-        st.caption("Minuto y medio para ver el flujo completo, con los datos reales de Nueva Delhi: de empezar "
-                   "un análisis a descargar el informe. Usa «Reproducir» para iniciarlo.")
+        st.caption("El flujo completo en menos de un minuto, con los datos reales de Nueva Delhi: de empezar un "
+                   "análisis a descargar el informe. Se puede pausar, retroceder, avanzar o saltar a cualquier escena.")
         # La misma animación se reproduce sola cuando se abre el archivo directamente (para grabarla).
         componentes.html(recorrido.read_text(encoding="utf-8").replace("const AUTO = true;", "const AUTO = false;"),
                          height=660)

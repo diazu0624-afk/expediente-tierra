@@ -62,15 +62,17 @@ Sin esa sesión la app sigue funcionando y avisa que los satélites no están di
 
 ### Recorrido animado y video
 
-`static/demo.html` es una animación de minuto y medio que recorre la herramienta con los datos
+`static/demo.html` es una animación de 55 segundos (once escenas de 5) que recorre la herramienta con los datos
 reales de Nueva Delhi. Aparece incrustada en la página de inicio y también sirve para grabar
 el video de presentación:
 
 1. Abre `static/demo.html?grabar=1` en el navegador a pantalla completa (sin controles).
 2. Graba la pantalla (en Mac: `Cmd + Shift + 5`) y recarga la página para que empiece.
 
-Para regenerarla tras cambiar datos o textos: `.venv/bin/python -m expediente.demo`. Teclas
-al verla sin `?grabar=1`: espacio (pausa), flechas (escena anterior o siguiente).
+Para regenerarla tras cambiar datos o textos: `.venv/bin/python -m expediente.demo`. Sin
+`?grabar=1` tiene una barra de controles: anterior, pausa, siguiente, reiniciar y una barra
+por escena para saltar a cualquiera. Teclas: espacio (pausa) y flechas (cambiar de escena).
+La duración de cada escena es el atributo `data-dur` y el ritmo interno, la variable `--k`.
 
 ### Enlaces directos
 
