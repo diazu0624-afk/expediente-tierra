@@ -64,10 +64,10 @@ HIPOTESIS = ["Está aumentando", "Está disminuyendo", "No está cambiando"]
 
 # Resultados de la simulación de validación (validacion/calibracion.py y validacion/veredictos.py).
 VALIDACION = {
-    "series": "300 a 400",
-    "clasica": "13–63 %", "clasica_baja": "13 %", "clasica_media": "32 %", "clasica_alta": "63 %",
-    "metodo": "3–5 %",
-    "potencia": "78–98 %", "potencia_baja": "98 %", "potencia_media": "78 %",
+    "series": "1,500 a 2,000",
+    "clasica": "14–64 %", "clasica_baja": "14 %", "clasica_media": "33 %", "clasica_alta": "64 %",
+    "metodo": "3–4 %",
+    "potencia": "79–98 %", "potencia_baja": "98 %", "potencia_media": "79 %",
 }
 PAGINAS: dict[str, object] = {}  # se llena al final, cuando ya existen las funciones de página
 
@@ -609,10 +609,10 @@ variabilidad y la autocorrelación de la serie.
 5. Sensibilidad al periodo: el signo se mantiene en al menos 80 % de los periodos posibles.
 
 **Validación.** Las pruebas se aplicaron a series sintéticas sin tendencia y con
-autocorrelación. La prueba de Mann-Kendall sin corregir dio falsos positivos entre 13 % y
-63 % de las veces. Las pruebas corregidas, entre 3 % y 8 %, cerca del 5 % nominal. El
-resultado completo alcanzó evidencia «fuerte» o «sólida» en 3 a 5 de cada 100 series sin
-tendencia, y en 78 a 98 de cada 100 cuando la tendencia existía (300 a 400 series por
+autocorrelación. La prueba de Mann-Kendall sin corregir dio falsos positivos entre 14 % y
+64 % de las veces. Las pruebas corregidas, entre 4 % y 7 %, cerca del 5 % nominal. El
+resultado completo alcanzó evidencia «fuerte» o «sólida» en 3 a 4 de cada 100 series sin
+tendencia, y en 79 a 98 de cada 100 cuando la tendencia existía (1,500 a 2,000 series por
 escenario; el código está en la carpeta `validacion/`).
 
 **Años de datos necesarios para detectar una tendencia.** Fórmula de Weatherhead et al. (1998).
