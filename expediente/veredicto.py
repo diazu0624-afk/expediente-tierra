@@ -1,4 +1,4 @@
-"""Redacta el veredicto a partir de los números del interrogatorio.
+"""Redacta el resultado a partir de los números del análisis.
 
 Todo el texto sale de plantillas: ninguna cifra se inventa ni se redondea distinto de
 como se calculó.
@@ -37,7 +37,7 @@ def _titular(r: Interrogatorio) -> str:
     if r.nivel == "fuerte":
         return f"{nombre}: {rumbo}, con evidencia fuerte"
     if r.nivel == "indicios":
-        return f"{nombre}: hay indicios de que va {rumbo}, pero no pruebas"
+        return f"{nombre}: posiblemente {rumbo}, con evidencia débil"
     return f"{nombre}: sin evidencia suficiente de una tendencia"
 
 
@@ -47,9 +47,10 @@ def _cuanto(r: Interrogatorio) -> str:
     rango = f"de {numero(bajo, signo=True)} a {numero(alto, signo=True)}"
     if r.nivel == "sin":
         return (f"La mejor estimación es {numero(r.pendiente_decada, signo=True)} {u} por década, "
-                f"pero el rango creíble ({rango}) no permite distinguirla de «sin cambio».")
+                f"pero el intervalo de confianza del 95 % ({rango}) incluye el cero o no supera las pruebas: "
+                f"no se distingue de la ausencia de cambio.")
     texto = (f"Cambia {numero(r.pendiente_decada, signo=True)} {u} por década "
-             f"(rango creíble al 95 %: {rango}). En los {r.anios_de_datos:.0f} años analizados "
+             f"(intervalo de confianza del 95 %: {rango}). En los {r.anios_de_datos:.0f} años analizados "
              f"eso suma {numero(r.cambio_total, signo=True)} {u}")
     if r.cambio_relativo is not None:
         texto += f", cerca de {r.cambio_relativo:+.0f} % de su valor promedio"
@@ -57,7 +58,7 @@ def _cuanto(r: Interrogatorio) -> str:
 
 
 def _evidencia(r: Interrogatorio) -> str:
-    texto = f"Superó {r.aprobadas} de {N_PRUEBAS} pruebas."
+    texto = f"Superó {r.aprobadas} de {N_PRUEBAS} pruebas de significancia."
     falladas = [p.nombre for p in r.pruebas if not p.aprobada]
     if falladas and r.aprobadas:
         texto += " No superó: " + ", ".join(falladas) + "."
@@ -73,10 +74,10 @@ def _espera(r: Interrogatorio) -> str:
         return (f"Con {tenemos:.0f} años ya habría datos de sobra para detectar un cambio constante "
                 f"de este tamaño. Que no supere las pruebas sugiere que el cambio no ha sido constante.")
     if r.anios_necesarios > 500:
-        return ("Si el cambio real fuera del tamaño estimado, es tan pequeño frente al ruido de "
+        return ("Si el cambio real fuera del tamaño estimado, es tan pequeño frente a la variabilidad natural de "
                 "este lugar que harían falta más de 500 años de datos para detectarlo.")
     return (f"Si el cambio real fuera del tamaño estimado, se necesitarían unos "
-            f"{r.anios_necesarios:.0f} años de datos para distinguirlo del ruido de este lugar. "
+            f"{r.anios_necesarios:.0f} años de datos para distinguirlo de la variabilidad natural de este lugar. "
             f"Hay {tenemos:.0f}: faltarían unos {r.anios_necesarios - tenemos:.0f}.")
 
 
@@ -85,26 +86,26 @@ def redactar(r: Interrogatorio) -> Veredicto:
     return Veredicto(_titular(r), _cuanto(r), _evidencia(r), _espera(r), advertencias)
 
 
-def expediente_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> str:
-    """El expediente completo como texto, para guardar o compartir."""
+def informe_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -> str:
+    """El informe completo como texto, para guardar o compartir."""
     v = redactar(r)
     inicio, fin = r.serie.index.min(), r.serie.index.max()
     lineas = [
-        f"# Expediente Tierra: {r.variable.nombre} en {lugar}",
+        f"# Informe de tendencia: {r.variable.nombre} en {lugar}",
         "",
-        f"**Veredicto: {v.titular}** ({NIVELES[r.nivel].lower()})",
+        f"**Resultado: {v.titular}** ({NIVELES[r.nivel].lower()})",
         "",
-        "## Qué se investigó",
+        "## Variable",
         f"{r.variable.nombre} ({r.variable.unidad}). {r.variable.definicion}",
         f"Fuente: {r.variable.fuente}.",
         "",
-        "## Dónde y cuándo",
+        "## Sitio y periodo",
         f"{lugar} (latitud {lat:.2f}, longitud {lon:.2f}), de {inicio:%m/%Y} a {fin:%m/%Y}.",
         "",
-        "## Cuánto cambia",
+        "## Tasa de cambio",
         v.cuanto,
         "",
-        "## Qué tan sólida es la evidencia",
+        "## Significancia estadística",
         v.evidencia,
         "",
         "| Prueba | Pregunta | Resultado | ¿Pasa? |",
@@ -112,31 +113,31 @@ def expediente_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -
     ]
     lineas += [f"| {p.nombre} | {p.pregunta} | {p.resultado} | {'Sí' if p.aprobada else 'No'} |"
                for p in r.pruebas]
-    lineas += ["", f"Sin corregir la memoria de la serie, Mann-Kendall daba {valor_p(r.mk_ingenuo.p)}."]
+    lineas += ["", f"Sin corregir la autocorrelación, la prueba de Mann-Kendall daba {valor_p(r.mk_ingenuo.p)}."]
     if v.espera:
-        lineas += ["", "## Cuánto habría que esperar", v.espera]
-    lineas += ["", "## Límites de este expediente"] + [f"- {a}" for a in v.advertencias]
+        lineas += ["", "## Años de datos necesarios para detectarla", v.espera]
+    lineas += ["", "## Limitaciones"] + [f"- {a}" for a in v.advertencias]
     return "\n".join(lineas) + "\n"
 
 
 def comparar(a: Interrogatorio, b: Interrogatorio, nombre_a: str, nombre_b: str) -> str:
-    """Veredicto del careo: ¿la misma variable va en la misma dirección en los dos lugares?"""
+    """Resultado de la comparación: ¿la variable tiene el mismo signo de tendencia en los dos lugares?"""
     u = a.variable.unidad
     firme_a, firme_b = a.nivel in ("solida", "fuerte"), b.nivel in ("solida", "fuerte")
     rumbo = lambda r: "sube" if r.sube else "baja"
     ritmo = lambda r: f"{numero(r.pendiente_decada, signo=True)} {u} por década"
     if firme_a and firme_b and a.sube != b.sube:
-        return (f"Direcciones opuestas: {rumbo(a)} en {nombre_a} ({ritmo(a)}) y {rumbo(b)} en "
+        return (f"Tendencias opuestas: {rumbo(a)} en {nombre_a} ({ritmo(a)}) y {rumbo(b)} en "
                 f"{nombre_b} ({ritmo(b)}), con evidencia firme en los dos.")
     if firme_a and firme_b:
         rapido, lento = (a, b) if abs(a.pendiente_decada) >= abs(b.pendiente_decada) else (b, a)
         nombre_rapido = nombre_a if rapido is a else nombre_b
         veces = abs(rapido.pendiente_decada) / abs(lento.pendiente_decada)
-        return (f"Misma dirección, distinto ritmo: {rumbo(a)} en los dos lugares, pero en "
+        return (f"Mismo signo, distinta tasa: {rumbo(a)} en los dos lugares, pero en "
                 f"{nombre_rapido} lo hace {veces:.1f} veces más rápido ({ritmo(a)} en {nombre_a}, "
                 f"{ritmo(b)} en {nombre_b}).")
     if firme_a or firme_b:
         firme, nombre_firme, nombre_otro = (a, nombre_a, nombre_b) if firme_a else (b, nombre_b, nombre_a)
-        return (f"Solo un lugar cambia: {rumbo(firme)} en {nombre_firme} ({ritmo(firme)}), mientras "
+        return (f"Tendencia en un solo lugar: {rumbo(firme)} en {nombre_firme} ({ritmo(firme)}), mientras "
                 f"que en {nombre_otro} no hay evidencia suficiente de una tendencia.")
-    return f"Ninguno de los dos lugares muestra evidencia firme de una tendencia."
+    return "Ninguno de los dos lugares muestra evidencia firme de una tendencia."

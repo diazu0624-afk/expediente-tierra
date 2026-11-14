@@ -1,96 +1,148 @@
-"""Expediente Tierra: abre un caso, interroga a los sospechosos y dicta un veredicto.
+"""Expediente Tierra: detección de tendencias en variables del sistema Tierra.
 
 Para correrla:  .venv/bin/streamlit run app.py
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
 from expediente import caso, datos, datos_gee, graficas, region, veredicto
-from expediente.variables import CATALOGO, POR_CODIGO
+from expediente.variables import CATALOGO, CATEGORIAS, METODOS, POR_CODIGO, REFERENCIAS, Variable
 
-st.set_page_config(page_title="Expediente Tierra", page_icon="🔎", layout="wide")
+RAIZ = Path(__file__).parent
+st.set_page_config(page_title="Expediente Tierra", page_icon=str(RAIZ / "static" / "favicon.png"),
+                   layout="wide")
 
-CASOS = [
+EJEMPLOS = [
     {"nombre": "Monterrey, México", "lat": 25.68, "lon": -100.32,
-     "pista": "Monterrey vivió una crisis de agua en 2022. ¿Llueve menos que antes? Interroga "
-              "a la lluvia y después al agua almacenada en la tierra (GRACE)."},
+     "pregunta": "Monterrey vivió una crisis de agua en 2022. ¿Disminuyó la precipitación? "
+                 "Compara la precipitación con el almacenamiento de agua terrestre (GRACE)."},
     {"nombre": "Nueva Delhi, India", "lat": 28.61, "lon": 77.21,
-     "pista": "Alrededor de Delhi se riega una de las zonas agrícolas más grandes del mundo. "
-              "Interroga al verdor de la vegetación y al agua almacenada: ¿van en la misma "
-              "dirección?"},
+     "pregunta": "Alrededor de Delhi se riega una de las zonas agrícolas más grandes del mundo. "
+                 "¿El índice de vegetación y el almacenamiento de agua tienen la misma tendencia?"},
     {"nombre": "Pekín, China", "lat": 39.90, "lon": 116.40,
-     "pista": "Pekín y Delhi crecieron quemando carbón. Interroga en las dos ciudades a las "
-              "partículas en el aire: ¿van en la misma dirección?"},
+     "pregunta": "Pekín y Delhi crecieron quemando carbón. ¿El espesor óptico de aerosoles "
+                 "tiene la misma tendencia en las dos ciudades?"},
     {"nombre": "Longyearbyen, Svalbard (Ártico)", "lat": 78.22, "lon": 15.65,
-     "pista": "El pueblo más al norte del mundo. Se dice que el Ártico se calienta más "
-              "rápido que el resto del planeta. Compara su temperatura con la de Monterrey."},
+     "pregunta": "Es el poblado más septentrional del mundo. ¿El Ártico se calienta más "
+                 "rápido que latitudes medias como la de Monterrey?"},
     {"nombre": "Niamey, Níger (Sahel)", "lat": 13.51, "lon": 2.11,
-     "pista": "El Sahel sufrió sequías devastadoras en los años ochenta. ¿Se recuperó? Mira en "
-              "el mapa el verdor de la vegetación: no toda la región cuenta la misma historia."},
+     "pregunta": "El Sahel sufrió sequías severas en los años ochenta. ¿Se recuperó? El mapa "
+                 "del índice de vegetación muestra tendencias distintas dentro de la región."},
     {"nombre": "Manaos, Brasil (Amazonía)", "lat": -3.10, "lon": -60.02,
-     "pista": "En el corazón de la selva más grande del planeta. ¿Está cambiando la lluvia? "
-              "Compara lo que dice el modelo (Precipitación) con lo que vio el satélite (GPM)."},
+     "pregunta": "En el centro de la selva más grande del planeta. ¿Está cambiando la "
+                 "precipitación? Compara el reanálisis con la observación del satélite GPM."},
 ]
 
-
-# Careos sugeridos: (título, índice del caso A, índice del caso B, variable, pista).
-CAREOS = [
-    ("Delhi contra Pekín: partículas en el aire", 1, 2, "AOD_55",
-     "Dos capitales que crecieron quemando carbón. ¿Su aire va en la misma dirección?"),
-    ("Monterrey contra el Ártico: temperatura", 0, 3, "T2M",
-     "El planeta se calienta, pero ¿al mismo ritmo en todas partes?"),
-    ("Delhi contra el Sahel: agua almacenada", 1, 4, "GRACE_AGUA",
-     "Dos regiones secas donde vive muchísima gente. ¿Qué pasa con el agua bajo sus pies?"),
-    ("Pekín contra Monterrey: lluvia medida desde satélite", 2, 0, "GPM_LLUVIA",
-     "Dos ciudades con escasez de agua. ¿En alguna está cambiando la lluvia?"),
+# Comparaciones sugeridas: (título, índice del ejemplo A, índice del B, variable, pregunta).
+COMPARACIONES = [
+    ("Delhi y Pekín: espesor óptico de aerosoles", 1, 2, "AOD_55",
+     "Dos capitales que crecieron quemando carbón. ¿Su carga de aerosoles tiene la misma tendencia?"),
+    ("Monterrey y el Ártico: temperatura del aire", 0, 3, "T2M",
+     "El planeta se calienta, pero ¿con la misma tasa en todas las latitudes?"),
+    ("Delhi y el Sahel: almacenamiento de agua terrestre", 1, 4, "GRACE_AGUA",
+     "Dos regiones semiáridas densamente pobladas. ¿Cómo cambia su reserva de agua?"),
+    ("Pekín y Monterrey: precipitación (satélite GPM)", 2, 0, "GPM_LLUVIA",
+     "Dos ciudades con estrés hídrico. ¿En alguna está cambiando la precipitación?"),
 ]
 
-
-MODOS = ["Empezar aquí", "Investigar un lugar", "Careo: comparar dos lugares"]
-
-# La guía: lo que le preocupa al usuario -> a qué sospechoso interrogar primero (el primero
-# de la lista que se pueda medir en el lugar). La lista vacía deja al más sospechoso.
+# Inicio guiado: tema de interés -> variable que se analiza primero (la primera de la lista
+# que se pueda medir en el sitio). La lista vacía deja la de mayor tendencia.
 TEMAS = {
-    "El calor": ["T2M"],
-    "La lluvia y el agua": ["GRACE_AGUA", "GPM_LLUVIA", "PRECTOTCORR"],
-    "El aire que respiramos": ["AOD_55"],
-    "Las plantas y los cultivos": ["MODIS_NDVI", "GWETROOT"],
-    "El frío, las heladas y la nieve": ["FROST_DAYS", "SNODP", "T2M_MIN"],
-    "No sé: muéstrame lo que más está cambiando": [],
+    "Temperatura": ["T2M"],
+    "Precipitación y agua": ["GRACE_AGUA", "GPM_LLUVIA", "PRECTOTCORR"],
+    "Calidad del aire": ["AOD_55"],
+    "Vegetación y cultivos": ["MODIS_NDVI", "GWETROOT"],
+    "Heladas y nieve": ["FROST_DAYS", "SNODP", "T2M_MIN"],
+    "La variable con mayor tendencia": [],
 }
-APUESTAS = ["Está subiendo", "Está bajando", "No está cambiando"]
+HIPOTESIS = ["Está aumentando", "Está disminuyendo", "No está cambiando"]
+PAGINAS: dict[str, object] = {}  # se llena al final, cuando ya existen las funciones de página
+
+ESTILOS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@500;600;700;800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+:root { --tinta:#0b0b0b; --tinta2:#52514e; --tenue:#898781; --filete:#d9d8d2; }
+html, body, .stApp, .stMarkdown, p, li, label, input, textarea, button, [data-baseweb] {
+  font-family: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+h1, h2, h3, h4 { font-family: 'Inter', system-ui, sans-serif !important; letter-spacing: -0.02em; }
+code, .et-mono { font-family: 'DM Mono', ui-monospace, Menlo, monospace; }
+.block-container { max-width: 1180px; padding-top: 4.5rem; padding-bottom: 5rem; }
+.et-eyebrow { font-family: 'DM Mono', monospace; font-size: .72rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--tinta2); }
+.et-titulo { font-family: 'Inter', sans-serif; font-weight: 800; color: var(--tinta);
+  font-size: clamp(2.2rem, 5vw, 3.7rem); line-height: 1.02; letter-spacing: -0.035em; margin: .4rem 0 .7rem; }
+.et-lead { font-size: 1.16rem; line-height: 1.5; max-width: 46rem; color: var(--tinta); margin: 0; }
+.et-sec { border-top: 2px solid var(--tinta); padding-top: .7rem; margin-top: 2.4rem;
+  display: flex; gap: 1rem; align-items: baseline; }
+.et-sec .n { font-family: 'DM Mono', monospace; font-size: .8rem; color: var(--tinta2); }
+.et-sec h2 { font-weight: 700; font-size: 1.5rem; margin: 0; padding: 0; color: var(--tinta); }
+.et-resultado { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 1.65rem;
+  line-height: 1.18; letter-spacing: -0.02em; color: var(--tinta); margin: .2rem 0 .4rem; }
+.et-paso .n { font-family: 'DM Mono', monospace; font-size: .75rem; color: var(--tinta2); }
+.et-paso .t { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 1.05rem; margin: .15rem 0 .3rem; }
+.et-paso p { font-size: .95rem; line-height: 1.45; color: var(--tinta2); margin: 0; }
+.et-paso { border-top: 1px solid var(--tinta); padding-top: .6rem; }
+.et-cifra { border-top: 1px solid var(--tinta); padding-top: .55rem; }
+.et-cifra .v { font-family: 'DM Mono', monospace; font-weight: 500; font-size: 2.1rem; line-height: 1.1;
+  letter-spacing: -0.04em; color: var(--tinta); margin-top: .25rem; white-space: nowrap; }
+.et-cifra .u { font-size: .9rem; color: var(--tinta2); margin-top: .15rem; }
+.et-cifra .d { font-size: .85rem; line-height: 1.4; color: var(--tinta2); margin-top: .45rem; }
+[data-testid="stCaptionContainer"] p { color: var(--tinta2); }
+</style>
+"""
+
+
+def encabezado(eyebrow: str, titulo: str, lead: str = "") -> None:
+    parrafo = f'<p class="et-lead">{lead}</p>' if lead else ""
+    st.html(f'<div class="et-eyebrow">{eyebrow}</div><div class="et-titulo">{titulo}</div>{parrafo}')
+
+
+def seccion(numero: int | None, titulo: str) -> None:
+    marca = f'<span class="n">{numero:02d}</span>' if numero is not None else ""
+    st.html(f'<div class="et-sec">{marca}<h2>{titulo}</h2></div>')
+
+
+def cifra(donde, etiqueta: str, valor: str, unidad: str = "", detalle: str = "") -> None:
+    """Un dato destacado: etiqueta, cifra en tipografía monoespaciada, unidad y nota opcional."""
+    extra = (f'<div class="u">{unidad}</div>' if unidad else "") + (f'<div class="d">{detalle}</div>' if detalle else "")
+    donde.html(f'<div class="et-cifra"><div class="et-eyebrow">{etiqueta}</div>'
+               f'<div class="v">{valor}</div>{extra}</div>')
 
 
 def _parametro(nombre: str) -> str:
-    """Parámetro de la URL (p. ej. ?caso=2&var=AOD_55), para compartir un caso ya abierto."""
+    """Parámetro de la URL (p. ej. /analisis?caso=2&var=AOD_55), para enlazar un análisis."""
     return st.query_params.get(nombre, "")
 
 
+# ------------------------------------------------------------------ datos (con caché)
+
 @st.cache_data(show_spinner=False)
 def cargar_datos(lat: float, lon: float) -> pd.DataFrame:
-    """Todas las variables en el punto: MERRA-2 por POWER más los satélites que respondan."""
+    """Todas las variables en el punto: reanálisis por POWER más los satélites que respondan."""
     tabla = datos.descargar_power(lat, lon, [v.codigo for v in CATALOGO if v.origen == "power"])
     for v in CATALOGO:
         if v.origen == "gee":
             try:
                 serie = datos_gee.serie_del_punto(datos_gee.descargar_cubo(lat, lon, v.codigo), lat, lon)
             except datos.ErrorDeDatos:
-                continue  # sin sesión de Earth Engine: el caso sigue con las demás variables
+                continue  # sin sesión de Earth Engine: el análisis sigue con las demás variables
             if not serie.empty:
                 tabla = tabla.join(serie.rename(v.codigo), how="outer")
     return tabla
 
 
 @st.cache_data(show_spinner=False)
-def cargar_sospechosos(lat: float, lon: float) -> pd.DataFrame:
+def cargar_exploracion(lat: float, lon: float) -> pd.DataFrame:
     return caso.escanear(cargar_datos(lat, lon))
 
 
 @st.cache_data(show_spinner=False)
-def cargar_interrogatorio(lat: float, lon: float, codigo: str) -> caso.Interrogatorio:
+def cargar_analisis(lat: float, lon: float, codigo: str) -> caso.Interrogatorio:
     return caso.interrogar(cargar_datos(lat, lon)[codigo], POR_CODIGO[codigo])
 
 
@@ -107,7 +159,7 @@ def cargar_mapa(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def cargar_interrogatorio_regional(lat: float, lon: float, codigo: str, lado: int) -> caso.Interrogatorio:
+def cargar_analisis_regional(lat: float, lon: float, codigo: str, lado: int) -> caso.Interrogatorio:
     promedio = region.promedio_regional(cargar_region(lat, lon, codigo, lado))
     return caso.interrogar(promedio, POR_CODIGO[codigo])
 
@@ -117,109 +169,279 @@ def buscar(texto: str) -> list[dict]:
     return datos.buscar_lugar(texto)
 
 
-def elegir_lugar() -> dict | None:
-    """Barra lateral: de dónde sale el caso."""
+def _buscar_sitio(donde, etiqueta: str, clave: str) -> dict | None:
+    """Campo de búsqueda por nombre y lista de coincidencias."""
+    texto = donde.text_input(etiqueta, placeholder="Ej. Guadalajara", key=f"texto_{clave}")
+    if not texto.strip():
+        return None
+    try:
+        lugares = buscar(texto.strip())
+    except datos.ErrorDeDatos as error:
+        donde.error(str(error))
+        return None
+    if not lugares:
+        donde.warning("No se encontró ese lugar. Prueba con otro nombre.")
+        return None
+    return donde.selectbox("Coincidencias", lugares, format_func=lambda l: l["nombre"], key=f"lista_{clave}")
+
+
+def plotly(figura, clave: str | None = None) -> None:
+    st.plotly_chart(figura, theme=None, width="stretch", config={"displayModeBar": False}, key=clave)
+
+
+# ------------------------------------------------------------------ fichas de variables
+
+def _tipo(v: Variable) -> str:
+    return "Observación satelital" if v.origen == "gee" else "Reanálisis o modelo"
+
+
+def ficha_variable(v: Variable) -> None:
+    """Definición completa de una variable: corta, técnica, producto de datos y referencias."""
+    st.markdown(f"#### {v.nombre}")
+    st.markdown(f"`{v.codigo}` · {v.categoria} · {_tipo(v)}")
+    st.markdown(f"**En pocas palabras.** {v.definicion}")
+    st.markdown(f"**Definición técnica.** {v.tecnica}")
+    st.markdown(
+        f"| Característica | Detalle |\n|---|---|\n"
+        f"| Unidad | {v.unidad} |\n"
+        f"| Producto de datos | {v.producto} |\n"
+        f"| Acceso | {v.fuente} |\n"
+        f"| Resolución espacial | {v.resolucion} |\n"
+        f"| Periodo analizado | Desde {v.desde}, datos mensuales |"
+    )
+    if v.aviso:
+        st.markdown(f"**Advertencia.** {v.aviso}")
+    st.markdown("**Referencias**")
+    for clave in v.referencias:
+        referencia = REFERENCIAS[clave]
+        st.markdown(f"- {referencia.cita} [{referencia.url}]({referencia.url})")
+
+
+def definicion_emergente(donde, v: Variable) -> None:
+    """Definición corta de la variable, con enlace a su ficha completa."""
+    with donde.popover("Definición de la variable"):
+        st.markdown(f"**{v.nombre}**  \n`{v.codigo}` · {v.unidad}")
+        st.write(v.definicion)
+        st.caption(f"Fuente: {v.fuente}.")
+        st.page_link(PAGINAS["variables"], label="Definición completa y referencias",
+                     icon=":material/arrow_forward:", query_params={"var": v.codigo})
+
+
+# ------------------------------------------------------------------ página: inicio
+
+def pagina_inicio() -> None:
+    encabezado(
+        "NASA Space Apps 2026 · Earth System Trend Detective",
+        "Expediente Tierra",
+        "Una herramienta para detectar tendencias en variables del sistema Tierra: qué cambia, "
+        "dónde, cuánto y si el cambio es estadísticamente significativo.",
+    )
+
+    seccion(1, "Empezar un análisis")
+    with st.container(border=True):
+        uno, dos, tres = st.columns(3)
+        tema = uno.radio("Tema de interés", list(TEMAS))
+        with dos:
+            opciones = [e["nombre"] for e in EJEMPLOS] + ["Otro lugar"]
+            elegido = st.selectbox("Sitio de estudio", opciones)
+            sitio = EJEMPLOS[opciones.index(elegido)] if elegido != opciones[-1] else None
+            if sitio is None:
+                sitio = _buscar_sitio(st, "Ciudad, región o país", "inicio")
+        with tres:
+            hipotesis = st.radio("Hipótesis: ¿qué esperas encontrar?", HIPOTESIS)
+            st.caption("Plantear la hipótesis antes de ver los datos evita ajustar la "
+                       "interpretación al resultado. Al final se contrasta con el análisis.")
+        if st.button("Iniciar el análisis", type="primary", disabled=sitio is None):
+            st.session_state["guiado"] = {"sitio": sitio, "tema": tema, "hipotesis": hipotesis}
+            st.switch_page(PAGINAS["analisis"])
+
+    seccion(2, "Método")
+    pasos = [
+        ("Exploración de variables", "Se calcula la tendencia de todas las variables del sitio "
+         "y se ordenan por su magnitud estandarizada."),
+        ("Distribución espacial", "Un mapa muestra dónde la tendencia es positiva, dónde es "
+         "negativa y dónde es significativa."),
+        ("Serie de tiempo", "Se elimina el ciclo estacional y se aplican cinco pruebas de "
+         "significancia a la tendencia."),
+        ("Resultado", "Tasa de cambio con su intervalo de confianza del 95 % y nivel de "
+         "evidencia."),
+    ]
+    for k, (columna, (titulo, texto)) in enumerate(zip(st.columns(4), pasos), start=1):
+        columna.html(f'<div class="et-paso"><div class="n">PASO {k}</div>'
+                     f'<div class="t">{titulo}</div><p>{texto}</p></div>')
+
+    seccion(3, "Validación del método")
+    st.markdown("Una serie que aparenta una tendencia puede no tenerla. Las pruebas se evaluaron "
+                "con series sintéticas **sin tendencia** y con autocorrelación, como las series "
+                "climáticas reales, para medir la tasa de falsos positivos.")
+    a, b, c = st.columns(3)
+    cifra(a, "Falsos positivos · prueba clásica", "13–63 %", "",
+          "Prueba de Mann-Kendall sin corregir, sobre ruido con autocorrelación de 0.3 a 0.9.")
+    cifra(b, "Falsos positivos · este método", "3–5 %", "",
+          "Series sin tendencia que alcanzaron el nivel de evidencia «fuerte» o «sólida».")
+    cifra(c, "Potencia estadística", "78–98 %", "",
+          "Tendencias reales detectadas (0.2 desviaciones estándar por década, 45 años de datos).")
+    st.caption("Las series climáticas tienen autocorrelación: cada mes se parece al anterior. La "
+               "prueba clásica supone datos independientes y por eso sobrestima la significancia.")
+
+    seccion(4, "Datos")
+    satelite = sum(v.origen == "gee" for v in CATALOGO)
+    a, b, c = st.columns(3)
+    cifra(a, "Variables", f"{len(CATALOGO)}", "series mensuales, de 1981 a la fecha")
+    cifra(b, "De reanálisis", f"{len(CATALOGO) - satelite}", "MERRA-2 y CERES, vía NASA POWER")
+    cifra(c, "De satélite", f"{satelite}", "GPM, MODIS y GRACE, vía Google Earth Engine")
+    st.page_link(PAGINAS["variables"], label="Definiciones y referencias de las variables",
+                 icon=":material/arrow_forward:")
+
+    seccion(5, "Comparación de dos lugares")
+    st.markdown("Un mismo proceso puede producir tendencias opuestas en regiones distintas. La "
+                "comparación coloca la misma variable de dos lugares sobre un mismo eje.")
+    st.page_link(PAGINAS["comparacion"], label="Ir a la comparación", icon=":material/arrow_forward:")
+
+
+# ------------------------------------------------------------------ página: variables
+
+def pagina_variables() -> None:
+    satelite = sum(v.origen == "gee" for v in CATALOGO)
+    encabezado(
+        "Catálogo",
+        "Variables",
+        f"{len(CATALOGO)} variables mensuales: {len(CATALOGO) - satelite} de reanálisis y "
+        f"modelos de la NASA y {satelite} de observación satelital. Cada una con su definición, "
+        f"el producto de datos del que proviene y sus referencias.",
+    )
+
+    consultada = POR_CODIGO.get(_parametro("var"))
+    if consultada:
+        seccion(None, "Variable consultada")
+        with st.container(border=True):
+            ficha_variable(consultada)
+        st.page_link(PAGINAS["analisis"], label="Volver al análisis", icon=":material/arrow_back:")
+
+    seccion(1, "Resumen")
+    st.dataframe(
+        pd.DataFrame([{"Variable": v.nombre, "Código": v.codigo, "Unidad": v.unidad,
+                       "Tema": v.categoria, "Tipo": _tipo(v), "Desde": v.desde,
+                       "Resolución espacial": v.resolucion} for v in CATALOGO]),
+        hide_index=True, width="stretch", height=36 * len(CATALOGO) + 40,
+        column_config={"Desde": st.column_config.NumberColumn(format="%d")},
+    )
+
+    for numero, categoria in enumerate(CATEGORIAS, start=2):
+        seccion(numero, categoria)
+        for v in (v for v in CATALOGO if v.categoria == categoria):
+            with st.expander(f"{v.nombre} · {v.codigo}", expanded=False):
+                ficha_variable(v)
+
+    seccion(len(CATEGORIAS) + 2, "Referencias")
+    st.markdown("**Datos**")
+    usadas = list(dict.fromkeys(clave for v in CATALOGO for clave in v.referencias))
+    for clave in sorted(usadas, key=lambda c: REFERENCIAS[c].cita):
+        st.markdown(f"- {REFERENCIAS[clave].cita} [{REFERENCIAS[clave].url}]({REFERENCIAS[clave].url})")
+    st.markdown("**Métodos estadísticos**")
+    for clave in sorted(METODOS, key=lambda c: REFERENCIAS[c].cita):
+        st.markdown(f"- {REFERENCIAS[clave].cita} [{REFERENCIAS[clave].url}]({REFERENCIAS[clave].url})")
+    st.caption("No se incluyen nubosidad, radiación solar ni albedo: el producto CERES SYN1deg "
+               "presenta discontinuidades en esos campos cuando cambian los satélites que lo alimentan.")
+
+
+# ------------------------------------------------------------------ página: análisis de un lugar
+
+def elegir_sitio() -> dict | None:
+    """Barra lateral: sitio de estudio."""
     barra = st.sidebar
-    barra.header("Abrir un caso")
-    modo = barra.radio("¿Dónde quieres investigar?",
-                       ["Casos de demostración", "Buscar un lugar", "Coordenadas"])
-    if modo == "Casos de demostración":
+    barra.markdown("**Sitio de estudio**")
+    modo = barra.radio("Origen", ["Ejemplos", "Buscar un lugar", "Coordenadas"], label_visibility="collapsed")
+    if modo == "Ejemplos":
         inicial = int(_parametro("caso")) if _parametro("caso").isdigit() else 0
-        elegido = barra.selectbox("Caso", CASOS, index=min(inicial, len(CASOS) - 1),
-                                  format_func=lambda c: c["nombre"])
-        barra.markdown(f"**La pista.** {elegido['pista']}")
+        elegido = barra.selectbox("Ejemplo", EJEMPLOS, index=min(inicial, len(EJEMPLOS) - 1),
+                                  format_func=lambda e: e["nombre"])
+        barra.markdown(f"**Pregunta de investigación.** {elegido['pregunta']}")
         return elegido
     if modo == "Buscar un lugar":
-        texto = barra.text_input("Ciudad, región o país", placeholder="Ej. Guadalajara")
-        if not texto.strip():
-            return None
-        try:
-            lugares = buscar(texto.strip())
-        except datos.ErrorDeDatos as error:
-            barra.error(str(error))
-            return None
-        if not lugares:
-            barra.warning("No encontré ese lugar. Prueba con otro nombre.")
-            return None
-        return barra.selectbox("¿Cuál de estos?", lugares, format_func=lambda l: l["nombre"])
+        return _buscar_sitio(barra, "Ciudad, región o país", "analisis")
     lat = barra.number_input("Latitud", -90.0, 90.0, 19.43, step=0.5, format="%.2f")
     lon = barra.number_input("Longitud", -180.0, 180.0, -99.13, step=0.5, format="%.2f")
     return {"nombre": f"Punto ({lat:.2f}, {lon:.2f})", "lat": lat, "lon": lon}
 
 
-def paso_lugar(lugar: dict, tabla_datos: pd.DataFrame) -> None:
-    st.subheader("1 · El lugar")
-    texto, mapa = st.columns([3, 2])
+def paso_sitio(sitio: dict, tabla_datos: pd.DataFrame) -> None:
+    seccion(1, "Sitio de estudio")
     satelites = [v.codigo.split("_")[0] for v in CATALOGO if v.origen == "gee" and v.codigo in tabla_datos]
+    texto, mapa = st.columns([3, 2])
     texto.markdown(
-        f"**{lugar['nombre']}**  \n"
-        f"Latitud {lugar['lat']:.2f}, longitud {lugar['lon']:.2f}  \n"
+        f"Latitud {sitio['lat']:.2f}, longitud {sitio['lon']:.2f}  \n"
         f"Datos mensuales de {tabla_datos.index.min():%Y} a {tabla_datos.index.max():%Y}: "
-        f"{sum(v.origen == 'power' for v in CATALOGO)} variables del modelo MERRA-2 de la NASA"
+        f"{sum(v.origen == 'power' for v in CATALOGO)} variables de reanálisis de la NASA"
         + (f" y {len(satelites)} de satélite ({', '.join(satelites)})." if satelites else ".")
     )
     if not satelites:
-        texto.caption("Los datos de satélite (GPM, MODIS, GRACE) no están disponibles: hace falta "
-                      "una sesión de Google Earth Engine en esta computadora.")
-    texto.caption("Los datos describen un cuadro de unos 50 km de lado alrededor del punto: "
-                  "es el clima de la zona, no el de una calle.")
-    mapa.map(pd.DataFrame({"lat": [lugar["lat"]], "lon": [lugar["lon"]]}), zoom=3, height=220)
+        texto.caption("Las variables de satélite (GPM, MODIS, GRACE) no están disponibles: hace "
+                      "falta una sesión de Google Earth Engine en esta computadora.")
+    texto.caption("Cada dato representa una celda de unos 50 km de lado alrededor del punto: "
+                  "describe el clima de la zona, no el de un sitio puntual.")
+    mapa.map(pd.DataFrame({"lat": [sitio["lat"]], "lon": [sitio["lon"]]}), zoom=3, height=220)
 
 
-def paso_sospechosos(sospechosos: pd.DataFrame, preferidas: tuple[str, ...] = ()) -> str | None:
-    st.subheader("2 · La rueda de sospechosos")
-    validos = sospechosos.dropna(subset=["estandarizada"])
-    firmes = int(validos["significativa"].sum())
+def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = ()) -> str | None:
+    seccion(2, "Exploración de variables")
+    validas = exploracion.dropna(subset=["estandarizada"])
+    firmes = int(validas["significativa"].sum())
     st.markdown(
-        f"Revisamos **{len(validos)} variables** en este lugar y las ordenamos por la fuerza de "
-        f"su tendencia. Para comparar grados con milímetros, cada tendencia se mide contra lo "
-        f"que esa variable suele variar de un año a otro. **{firmes}** muestran una tendencia "
-        f"significativa en esta primera revisión."
+        f"Se calculó la tendencia de **{len(validas)} variables** en este sitio. Para comparar "
+        f"variables con unidades distintas, cada tendencia se divide entre la variabilidad "
+        f"interanual de esa variable. **{firmes}** tienen una tendencia significativa en esta "
+        f"primera revisión. Pasa el cursor sobre una barra para ver la definición de la variable."
     )
-    st.plotly_chart(graficas.sospechosos(sospechosos), theme=None, width="stretch",
-                    config={"displayModeBar": False})
-    st.caption("Al revisar muchas variables a la vez, alguna parecería culpable por pura "
-               "casualidad. Por eso aquí la significancia se exige con una vara más alta "
-               "(ajuste de Benjamini-Hochberg).")
+    plotly(graficas.exploracion(exploracion))
+    st.caption("Al evaluar muchas variables a la vez aumenta la probabilidad de falsos positivos. "
+               "Por eso los valores p se ajustan con el procedimiento de Benjamini-Hochberg.")
     with st.expander("Ver como tabla"):
-        vista = sospechosos.assign(tendencia=sospechosos["significativa"].map(
-            {True: "significativa", False: "no significativa"}).where(sospechosos["nota"] == "", "—"))
+        vista = exploracion.assign(
+            tendencia=exploracion["significativa"].map({True: "significativa", False: "no significativa"})
+            .where(exploracion["nota"] == "", "—"),
+            definicion=exploracion["codigo"].map(lambda c: POR_CODIGO[c].definicion),
+        )
         st.dataframe(
-            vista[["nombre", "categoria", "unidad", "anios", "pendiente_decada",
+            vista[["nombre", "definicion", "unidad", "anios", "pendiente_decada",
                    "estandarizada", "p_ajustada", "tendencia", "nota"]],
             hide_index=True, width="stretch",
             column_config={
-                "nombre": "Variable", "categoria": "Tema", "unidad": "Unidad", "anios": "Años",
+                "nombre": "Variable", "definicion": st.column_config.TextColumn("Definición", width="large"),
+                "unidad": "Unidad", "anios": "Años",
                 "pendiente_decada": st.column_config.NumberColumn("Cambio por década", format="%.3g"),
-                "estandarizada": st.column_config.NumberColumn("En escala común", format="%+.2f"),
+                "estandarizada": st.column_config.NumberColumn("Tendencia estandarizada", format="%+.2f"),
                 "p_ajustada": st.column_config.NumberColumn("p ajustada", format="%.3f"),
                 "tendencia": "Tendencia", "nota": "Nota",
             },
         )
-    if validos.empty:
+    if validas.empty:
         st.warning("Ninguna variable tiene datos suficientes en este punto.")
         return None
-    codigos = list(validos["codigo"])
-    rumbo = dict(zip(validos["codigo"], validos["estandarizada"]))
+    codigos = list(validas["codigo"])
+    signo = dict(zip(validas["codigo"], validas["estandarizada"]))
     inicial = next((c for c in (*preferidas, _parametro("var")) if c in codigos), codigos[0])
-    return st.selectbox(
-        "Elige a tu sospechoso",
+    selector, definicion = st.columns([5, 2], vertical_alignment="bottom")
+    codigo = selector.selectbox(
+        "Variable a analizar",
         codigos,
         index=codigos.index(inicial),
-        key=f"sospechoso_{inicial}_{len(codigos)}",
-        format_func=lambda c: f"{POR_CODIGO[c].nombre} ({'sube' if rumbo[c] > 0 else 'baja'})",
+        key=f"variable_{inicial}_{len(codigos)}",
+        format_func=lambda c: f"{POR_CODIGO[c].nombre} ({'positiva' if signo[c] > 0 else 'negativa'})",
     )
+    definicion_emergente(definicion, POR_CODIGO[codigo])
+    return codigo
 
 
-def paso_mapa(lugar: dict, codigo: str) -> int | None:
-    """El "dónde": mapa de tendencias de la región. Devuelve el lado del recuadro, o None si falló."""
+def paso_mapa(sitio: dict, codigo: str) -> int | None:
+    """Distribución espacial de la tendencia. Devuelve el lado del recuadro, o None si falló."""
     v = POR_CODIGO[codigo]
-    st.subheader("3 · La escena: ¿dónde cambia?")
-    lado = st.radio("Tamaño de la región alrededor del lugar", [4, 8], index=1, horizontal=True,
+    seccion(3, "Distribución espacial de la tendencia")
+    lado = st.radio("Tamaño de la región alrededor del sitio", [4, 8], index=1, horizontal=True,
                     format_func=lambda g: f"{g}° × {g}° (unos {g * 111:,} km de lado)")
     try:
-        with st.spinner("Pidiendo la región a la NASA..."):
-            mapa = cargar_mapa(lugar["lat"], lugar["lon"], codigo, lado)
+        with st.spinner("Descargando los datos de la región..."):
+            mapa = cargar_mapa(sitio["lat"], sitio["lon"], codigo, lado)
     except datos.ErrorDeDatos as error:
         st.warning(f"No se pudo cargar el mapa de la región. {error}")
         return None
@@ -227,15 +449,14 @@ def paso_mapa(lugar: dict, codigo: str) -> int | None:
         st.info("Esta variable no se puede medir en ninguna celda de la región.")
         return None
     r = region.resumen(mapa)
-    texto = (f"**{v.nombre}** en {r['celdas']} celdas de unos 50 km. Sube de forma significativa "
-             f"en **{r['sube']:.0f} %** de la región y baja en **{r['baja']:.0f} %**.")
+    texto = (f"**{v.nombre}** en {r['celdas']} celdas. La tendencia es positiva y significativa "
+             f"en **{r['sube']:.0f} %** de la región, y negativa y significativa en **{r['baja']:.0f} %**.")
     if r["sube"] >= 5 and r["baja"] >= 5:
-        texto += " **La misma variable va en direcciones opuestas dentro de la misma región.**"
+        texto += " **La misma variable presenta tendencias opuestas dentro de la región.**"
     st.markdown(texto)
-    st.plotly_chart(graficas.mapa(mapa, v.unidad, lugar["lat"], lugar["lon"]), theme=None,
-                    width="stretch", config={"displayModeBar": False})
-    st.caption("Rojo: sube. Azul: baja. El punto marca las celdas donde la tendencia es "
-               "significativa después de ajustar por haber revisado todas las celdas a la vez.")
+    plotly(graficas.mapa(mapa, v.unidad, sitio["lat"], sitio["lon"]))
+    st.caption("Rojo: tendencia positiva. Azul: negativa. El punto marca las celdas con tendencia "
+               "significativa tras el ajuste de Benjamini-Hochberg por comparaciones múltiples.")
     with st.expander("Ver como tabla"):
         st.dataframe(mapa, hide_index=True, width="stretch", column_config={
             "lat": "Latitud", "lon": "Longitud",
@@ -246,30 +467,30 @@ def paso_mapa(lugar: dict, codigo: str) -> int | None:
     return lado
 
 
-def paso_interrogatorio(r: caso.Interrogatorio) -> None:
+def paso_serie(r: caso.Interrogatorio) -> None:
     v = r.variable
-    st.subheader("4 · El interrogatorio")
-    st.markdown(f"**{v.nombre}** ({v.unidad}). {v.definicion}  \nFuente: {v.fuente}.")
+    seccion(4, "Serie de tiempo y pruebas de significancia")
+    texto, definicion = st.columns([5, 2], vertical_alignment="center")
+    texto.markdown(f"**{v.nombre}** ({v.unidad}). {v.definicion}  \nFuente: {v.fuente}.")
+    definicion_emergente(definicion, v)
     if v.aviso:
         st.caption(v.aviso)
 
-    con_tendencia, original = st.tabs(["La tendencia", "Los datos tal como llegan"])
+    con_tendencia, original = st.tabs(["Anomalías y tendencia", "Serie original"])
     with con_tendencia:
         if r.resolucion == "mensual":
-            st.caption("A cada mes se le restó lo normal para ese mes del año. Así desaparece "
-                       "el vaivén de las estaciones y queda a la vista el cambio de fondo.")
+            st.caption("A cada mes se le restó su climatología (el promedio de ese mes del año). "
+                       "Así se elimina el ciclo estacional y queda la variación de fondo.")
         else:
-            st.caption("Este fenómeno solo ocurre parte del año, así que se analiza el promedio "
-                       "de cada año.")
-        st.plotly_chart(graficas.tendencia(r), theme=None, width="stretch",
-                        config={"displayModeBar": False})
+            st.caption("Esta variable solo toma valores parte del año, así que se analizan los "
+                       "promedios anuales.")
+        plotly(graficas.tendencia(r))
     with original:
-        st.caption("Cada punto es el promedio de un mes. El sube y baja regular son las estaciones.")
-        st.plotly_chart(graficas.serie_original(r), theme=None, width="stretch",
-                        config={"displayModeBar": False})
+        st.caption("Promedios mensuales tal como se reciben. La oscilación regular es el ciclo estacional.")
+        plotly(graficas.serie_original(r))
 
-    st.markdown("**Las cinco pruebas.** Una tendencia que se ve en la gráfica todavía puede ser "
-                "casualidad. Solo la que resiste las cinco se considera sólida.")
+    st.markdown("**Pruebas de significancia.** Una tendencia visible en la gráfica puede deberse al "
+                "azar. Se considera sólida solo si supera las cinco pruebas.")
     for prueba in r.pruebas:
         with st.container(border=True):
             estado, detalle, ayuda = st.columns([1, 7, 2], vertical_alignment="center")
@@ -285,334 +506,255 @@ def paso_interrogatorio(r: caso.Interrogatorio) -> None:
         ingenuo, corregido = caso.valor_p(r.mk_ingenuo.p), caso.valor_p(r.mk.prueba.p)
         if r.mk_ingenuo.p < 0.05 <= r.mk.prueba.p:
             st.warning(
-                f"**La trampa de la memoria.** Sin corregirla, Mann-Kendall habría declarado "
-                f"esta tendencia significativa ({ingenuo}). Al quitar la memoria de la serie "
-                f"deja de serlo ({corregido}): era un espejismo.", icon=":material/warning:")
+                f"**Efecto de la autocorrelación.** Sin corregirla, la prueba de Mann-Kendall "
+                f"habría declarado significativa esta tendencia ({ingenuo}). Con la corrección "
+                f"deja de serlo ({corregido}): era un falso positivo.", icon=":material/warning:")
         else:
-            st.caption(f"Efecto de corregir la memoria en Mann-Kendall: sin corregir, {ingenuo}; "
-                       f"corregida, {corregido}.")
+            st.caption(f"Efecto de corregir la autocorrelación en Mann-Kendall: sin corregir, "
+                       f"{ingenuo}; corregida, {corregido}.")
 
-    st.markdown("**¿Depende de las fechas?** Cada cuadro es la tendencia de un periodo distinto. "
-                "Si todo el triángulo es de un solo color, la tendencia no depende de dónde se "
-                "empiece a contar. La esquina superior izquierda es el periodo completo.")
-    st.plotly_chart(graficas.triangulo(r), theme=None, width="stretch",
-                    config={"displayModeBar": False})
+    st.markdown("**Sensibilidad al periodo.** Cada celda es la tendencia de un periodo distinto. "
+                "Si todo el triángulo tiene el mismo color, el signo de la tendencia no depende de "
+                "los años elegidos. La esquina superior izquierda es el periodo completo.")
+    plotly(graficas.triangulo(r))
 
 
-def _resultado_de_apuesta(r: caso.Interrogatorio, apuesta: str) -> str:
-    """Compara lo que el usuario apostó antes de ver los datos con lo que dictan las pruebas."""
+def _contraste_de_hipotesis(r: caso.Interrogatorio, hipotesis: str) -> str:
+    """Compara la hipótesis planteada antes de ver los datos con el resultado del análisis."""
     firme = r.nivel in ("solida", "fuerte")
-    real = APUESTAS[2] if not firme else APUESTAS[0] if r.sube else APUESTAS[1]
-    if apuesta == real:
-        return f"**Tu apuesta: «{apuesta.lower()}».** Los datos te dan la razón."
-    dicen = "no hay evidencia suficiente de un cambio" if not firme else real.lower()
-    return f"**Tu apuesta: «{apuesta.lower()}».** Los datos dicen otra cosa: {dicen}."
+    real = HIPOTESIS[2] if not firme else HIPOTESIS[0] if r.sube else HIPOTESIS[1]
+    if hipotesis == real:
+        return f"**Hipótesis inicial: «{hipotesis.lower()}».** El análisis la respalda."
+    dice = "no hay evidencia suficiente de un cambio" if not firme else real.lower()
+    return f"**Hipótesis inicial: «{hipotesis.lower()}».** El análisis no la respalda: {dice}."
 
 
-def paso_veredicto(r: caso.Interrogatorio, lugar: dict, apuesta: str | None = None) -> None:
-    st.subheader("5 · El veredicto")
+def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = None) -> None:
+    seccion(5, "Resultado")
     v = veredicto.redactar(r)
     u = r.variable.unidad
     with st.container(border=True):
-        st.markdown(f"### {v.titular}")
+        st.html(f'<div class="et-eyebrow">{caso.NIVELES[r.nivel]}</div>'
+                f'<div class="et-resultado">{v.titular}</div>')
         a, b, c, d = st.columns(4)
-        a.metric("Cambio por década", f"{caso.numero(r.pendiente_decada, signo=True)} {u}")
-        b.metric(f"Cambio en {r.anios_de_datos:.0f} años", f"{caso.numero(r.cambio_total, signo=True)} {u}")
-        c.metric("Pruebas superadas", f"{r.aprobadas} de {caso.N_PRUEBAS}")
-        d.metric("Evidencia", caso.NIVELES_CORTOS[r.nivel])
-        st.markdown(f"**Dónde.** {lugar['nombre']}.  \n**Cuánto.** {v.cuanto}  \n**Qué tan seguro.** {v.evidencia}")
+        cifra(a, "Tasa de cambio", caso.numero(r.pendiente_decada, signo=True), f"{u} por década")
+        cifra(b, "Cambio acumulado", caso.numero(r.cambio_total, signo=True), f"{u} en {r.anios_de_datos:.0f} años")
+        cifra(c, "Pruebas superadas", f"{r.aprobadas}/{caso.N_PRUEBAS}", "pruebas de significancia")
+        cifra(d, "Nivel de evidencia", caso.NIVELES_CORTOS[r.nivel], "")
+        st.markdown(f"**Sitio.** {sitio['nombre']}.  \n**Tasa de cambio.** {v.cuanto}  \n"
+                    f"**Significancia.** {v.evidencia}")
         if v.espera:
-            st.markdown(f"**Cuánto habría que esperar.** {v.espera}")
-        if apuesta:
-            st.markdown(_resultado_de_apuesta(r, apuesta))
-        with st.expander("Límites de este expediente"):
+            st.markdown(f"**Años de datos necesarios.** {v.espera}")
+        if hipotesis:
+            st.markdown(_contraste_de_hipotesis(r, hipotesis))
+        with st.expander("Limitaciones"):
             for advertencia in v.advertencias:
                 st.markdown(f"- {advertencia}")
     st.download_button(
-        "Descargar el expediente",
-        veredicto.expediente_markdown(r, lugar["nombre"], lugar["lat"], lugar["lon"]),
-        file_name=f"expediente_{r.variable.codigo}_{lugar['lat']:.2f}_{lugar['lon']:.2f}.md",
+        "Descargar el informe",
+        veredicto.informe_markdown(r, sitio["nombre"], sitio["lat"], sitio["lon"]),
+        file_name=f"informe_{r.variable.codigo}_{sitio['lat']:.2f}_{sitio['lon']:.2f}.md",
         mime="text/markdown",
         icon=":material/download:",
     )
 
 
-def _lugar_del_careo(barra, etiqueta: str, indice: int) -> dict | None:
-    """Selector de un lugar para el careo: un caso de demostración o una búsqueda libre."""
-    opciones = [c["nombre"] for c in CASOS] + ["Buscar otro lugar..."]
-    elegido = barra.selectbox(etiqueta, opciones, index=indice)
-    if elegido != opciones[-1]:
-        return CASOS[opciones.index(elegido)]
-    texto = barra.text_input(f"{etiqueta}: ciudad, región o país", key=f"busqueda_{etiqueta}")
-    if not texto.strip():
-        return None
-    try:
-        lugares = buscar(texto.strip())
-    except datos.ErrorDeDatos as error:
-        barra.error(str(error))
-        return None
-    if not lugares:
-        barra.warning("No encontré ese lugar. Prueba con otro nombre.")
-        return None
-    return barra.selectbox(f"{etiqueta}: ¿cuál de estos?", lugares, format_func=lambda l: l["nombre"])
-
-
-def pagina_careo() -> None:
-    """Dos lugares, una variable: ¿van en la misma dirección?"""
-    barra = st.sidebar
-    titulos = [c[0] for c in CAREOS] + ["Armar mi propio careo"]
-    inicial = int(_parametro("careo")) if _parametro("careo").isdigit() else 0
-    elegido = barra.selectbox("Careo", titulos, index=min(inicial, len(titulos) - 1))
-    if elegido != titulos[-1]:
-        _, i, j, codigo, pista = CAREOS[titulos.index(elegido)]
-        lugar_a, lugar_b = CASOS[i], CASOS[j]
-        barra.markdown(f"**La pista.** {pista}")
-    else:
-        lugar_a = _lugar_del_careo(barra, "Lugar A", 0)
-        lugar_b = _lugar_del_careo(barra, "Lugar B", 3)
-        if lugar_a is None or lugar_b is None:
-            st.info("Elige los dos lugares en la barra lateral.")
-            return
-        try:
-            with st.spinner("Pidiendo los datos a la NASA..."):
-                validos = [cargar_sospechosos(l["lat"], l["lon"]).dropna(subset=["estandarizada"])["codigo"]
-                           for l in (lugar_a, lugar_b)]
-        except datos.ErrorDeDatos as error:
-            st.error(f"No se pudieron obtener los datos. {error}")
-            return
-        comunes = [v.codigo for v in CATALOGO if v.codigo in set(validos[0]) & set(validos[1])]
-        if not comunes:
-            st.warning("Estos dos lugares no tienen ninguna variable medible en común.")
-            return
-        codigo = barra.selectbox("Variable", comunes, format_func=lambda c: POR_CODIGO[c].nombre)
-    if lugar_a["nombre"] == lugar_b["nombre"]:
-        st.info("Elige dos lugares distintos para el careo.")
-        return
-
-    v = POR_CODIGO[codigo]
-    a_nombre, b_nombre = lugar_a["nombre"], lugar_b["nombre"]
-    st.subheader(f"Careo: {v.nombre}")
-    st.markdown(f"**{a_nombre}** frente a **{b_nombre}**.  \n{v.definicion} Fuente: {v.fuente}.")
-    alcance = st.radio("¿A quién interrogamos en cada lugar?",
-                       ["El punto", "El promedio de la región (8° × 8°)"], horizontal=True)
-    try:
-        with st.spinner("Interrogando a los dos lugares..."):
-            if alcance == "El punto":
-                a = cargar_interrogatorio(lugar_a["lat"], lugar_a["lon"], codigo)
-                b = cargar_interrogatorio(lugar_b["lat"], lugar_b["lon"], codigo)
-            else:
-                a = cargar_interrogatorio_regional(lugar_a["lat"], lugar_a["lon"], codigo, 8)
-                b = cargar_interrogatorio_regional(lugar_b["lat"], lugar_b["lon"], codigo, 8)
-    except (caso.CasoImposible, datos.ErrorDeDatos, KeyError) as error:
-        st.warning(f"No se puede hacer este careo: en uno de los lugares la variable no se puede medir. {error}")
-        return
-
-    with st.container(border=True):
-        st.markdown(f"### {veredicto.comparar(a, b, a_nombre, b_nombre)}")
-    st.plotly_chart(graficas.careo(a, b, a_nombre, b_nombre), theme=None, width="stretch",
-                    config={"displayModeBar": False})
-    st.caption("La curva es el promedio de 12 meses, ya sin el vaivén de las estaciones; la recta es "
-               "la tendencia. Cada lugar se compara con su propio valor normal, así que las dos "
-               "curvas parten de cero aunque un lugar sea mucho más caliente o lluvioso que el otro.")
-
-    mapas = []
-    for lugar in (lugar_a, lugar_b):
-        try:
-            mapas.append(cargar_mapa(lugar["lat"], lugar["lon"], codigo, 8))
-        except datos.ErrorDeDatos:
-            mapas.append(pd.DataFrame())
-    # Los dos mapas comparten la escala de color: el mismo tono significa el mismo cambio.
-    tope = max((float(m["pendiente_decada"].abs().max()) for m in mapas if not m.empty), default=None)
-    for columna, r, lugar, mapa in zip(st.columns(2), (a, b), (lugar_a, lugar_b), mapas):
-        with columna.container(border=True):
-            st.markdown(f"**{lugar['nombre']}**")
-            izq, der = st.columns(2)
-            izq.metric("Cambio por década", f"{caso.numero(r.pendiente_decada, signo=True)} {v.unidad}")
-            der.metric("Evidencia", f"{caso.NIVELES_CORTOS[r.nivel]} ({r.aprobadas} de {caso.N_PRUEBAS})")
-            st.caption(veredicto.redactar(r).cuanto)
-            if not mapa.empty:
-                resumen = region.resumen(mapa)
-                st.plotly_chart(graficas.mapa(mapa, v.unidad, lugar["lat"], lugar["lon"], tope=tope, alejar=0.4),
-                                theme=None, width="stretch", config={"displayModeBar": False},
-                                key=f"mapa_{lugar['nombre']}")
-                st.caption(f"En la región: sube de forma significativa en {resumen['sube']:.0f} % "
-                           f"de las celdas y baja en {resumen['baja']:.0f} %.")
-    st.caption("Para ver las cinco pruebas de cada lugar, ábrelo en «Investigar un lugar».")
-    metodo()
-
-
 def metodo() -> None:
-    with st.expander("Cómo trabaja el detective (método y validación)"):
+    with st.expander("Método y validación"):
         st.markdown(
             """
-**Datos.** Series mensuales de dos tipos. Del modelo: [NASA POWER](https://power.larc.nasa.gov/)
-reparte variables del reanálisis MERRA-2 para cualquier punto del planeta desde 1981. De
-satélite, por Google Earth Engine: lluvia de GPM IMERG (desde 1998), verdor de la vegetación
-de MODIS (desde 2000) y agua almacenada de GRACE (desde 2002). Para la
-región se pide cada celda de unos 50 km dentro del recuadro y se promedia según su área.
+**Datos.** Series mensuales de dos tipos. De reanálisis: [NASA POWER](https://power.larc.nasa.gov/)
+distribuye variables de MERRA-2 para cualquier punto del planeta desde 1981. De satélite, por
+Google Earth Engine: precipitación de GPM IMERG (desde 1998), índice de vegetación de MODIS
+(desde 2000) y almacenamiento de agua terrestre de GRACE (desde 2002). Para la región se usa
+cada celda de unos 50 km dentro del recuadro y se promedia ponderando por área.
 
-**Cuánto cambia.** La pendiente de una recta ajustada por mínimos cuadrados, con un rango
-creíble al 95 % obtenido simulando 2,000 series con el mismo ruido y la misma memoria.
+**Tasa de cambio.** Pendiente de una regresión lineal por mínimos cuadrados sobre las
+anomalías, con intervalo de confianza del 95 % por bootstrap de 2,000 series que conservan la
+variabilidad y la autocorrelación de la serie.
 
-**Las cinco pruebas.**
-1. Mann-Kendall con la memoria de la serie corregida (Zhang et al., 2000; Wang y Swail, 2001).
+**Pruebas de significancia.**
+1. Mann-Kendall con preblanqueo iterativo para corregir la autocorrelación (Zhang et al., 2000; Wang y Swail, 2001).
 2. Prueba t de la pendiente con tamaño de muestra efectivo (Santer et al., 2000).
-3. Intervalo de confianza por simulación: ¿deja fuera al cero?
-4. La misma tendencia con promedios anuales (o quitando un año a la vez).
-5. La dirección se mantiene en al menos 80 % de los periodos posibles.
+3. Intervalo de confianza del 95 % por bootstrap: ¿excluye el cero?
+4. Persistencia de la tendencia con promedios anuales (o excluyendo un año a la vez).
+5. Sensibilidad al periodo: el signo se mantiene en al menos 80 % de los periodos posibles.
 
-**Por qué corregir la memoria.** Probamos al detective con series inventadas que no tienen
-ninguna tendencia pero sí memoria, como los datos reales. La prueba de Mann-Kendall sin
-corregir acusó falsamente entre 13 % y 63 % de las veces. Las pruebas corregidas se
-equivocaron entre 3 % y 8 %, cerca del 5 % que promete un nivel de confianza de 95 %.
-El veredicto completo llegó a «evidencia fuerte» o «sólida» en 3 a 5 de cada 100 series
-sin tendencia, y en 78 a 98 de cada 100 cuando la tendencia sí existía (300 a 400 series
-por escenario; los detalles están en la carpeta `validacion/`).
+**Validación.** Las pruebas se aplicaron a series sintéticas sin tendencia y con
+autocorrelación. La prueba de Mann-Kendall sin corregir dio falsos positivos entre 13 % y
+63 % de las veces. Las pruebas corregidas, entre 3 % y 8 %, cerca del 5 % nominal. El
+resultado completo alcanzó evidencia «fuerte» o «sólida» en 3 a 5 de cada 100 series sin
+tendencia, y en 78 a 98 de cada 100 cuando la tendencia existía (300 a 400 series por
+escenario; el código está en la carpeta `validacion/`).
 
-**Años necesarios para detectar una tendencia.** Fórmula de Weatherhead et al. (1998).
+**Años de datos necesarios para detectar una tendencia.** Fórmula de Weatherhead et al. (1998).
             """
         )
+        st.page_link(PAGINAS["variables"], label="Referencias completas", icon=":material/arrow_forward:")
 
 
-def _abrir_caso_guiado(lugar: dict, tema: str, apuesta: str) -> None:
-    st.session_state["guiado"] = {"lugar": lugar, "tema": tema, "apuesta": apuesta}
-    st.session_state["modo"] = MODOS[1]
-
-
-def _ir_a(modo: str) -> None:
-    st.session_state["modo"] = modo
-
-
-def pagina_inicio() -> None:
-    """Portada: qué es esto, tres preguntas para abrir un caso y por qué confiar en el veredicto."""
-    st.markdown("Los satélites y los modelos de la NASA llevan décadas midiendo el planeta. "
-                "Aquí tú eres el detective: eliges un lugar, encuentras qué está cambiando y "
-                "compruebas si el cambio es real o pura casualidad.")
-
-    st.subheader("Abre tu primer caso")
-    with st.container(border=True):
-        uno, dos, tres = st.columns(3)
-        tema = uno.radio("1 · ¿Qué te preocupa?", list(TEMAS))
-        with dos:
-            opciones = [c["nombre"] for c in CASOS] + ["Otro lugar..."]
-            elegido = st.selectbox("2 · ¿En dónde?", opciones)
-            lugar = CASOS[opciones.index(elegido)] if elegido != opciones[-1] else None
-            if lugar is None:
-                texto = st.text_input("Ciudad, región o país", placeholder="Ej. Guadalajara")
-                if texto.strip():
-                    try:
-                        lugares = buscar(texto.strip())
-                    except datos.ErrorDeDatos as error:
-                        lugares = []
-                        st.error(str(error))
-                    if lugares:
-                        lugar = st.selectbox("¿Cuál de estos?", lugares, format_func=lambda l: l["nombre"])
-                    else:
-                        st.warning("No encontré ese lugar. Prueba con otro nombre.")
-        with tres:
-            apuesta = st.radio("3 · Antes de ver los datos, ¿qué crees que está pasando?", APUESTAS)
-            st.caption("Un buen detective anota su sospecha antes de mirar la evidencia. "
-                       "Al final sabrás si acertaste.")
-        st.button("Abrir el caso", type="primary", disabled=lugar is None,
-                  on_click=_abrir_caso_guiado, args=(lugar, tema, apuesta))
-
-    st.subheader("Cómo trabaja el detective")
-    pasos = [
-        ("1 · La rueda de sospechosos", "Revisa todas las variables del lugar y las ordena de la que más cambia a la que menos."),
-        ("2 · La escena", "Dibuja en un mapa dónde sube, dónde baja y dónde no pasa nada."),
-        ("3 · El interrogatorio", "Somete la tendencia a cinco pruebas estadísticas. Solo la que resiste todas es sólida."),
-        ("4 · El veredicto", "Dice qué cambia, dónde, cuánto y qué tan segura es la evidencia."),
-    ]
-    for columna, (titulo, texto) in zip(st.columns(4), pasos):
-        with columna.container(border=True):
-            st.markdown(f"**{titulo}**  \n{texto}")
-
-    st.subheader("Por qué confiar en el veredicto")
-    st.markdown("Una gráfica que parece subir puede engañar. Probamos al detective con miles de "
-                "series inventadas que **no tenían ninguna tendencia**, para contar cuántas veces "
-                "daba una falsa alarma.")
-    a, b, c = st.columns(3)
-    a.metric("Falsas alarmas de la prueba que casi todos usan", "13 a 63 %",
-             help="Prueba de Mann-Kendall sin corregir, sobre series con memoria como las del clima real.")
-    b.metric("Falsas alarmas de nuestro veredicto", "3 a 5 %",
-             help="Porcentaje de series sin tendencia que llegaron a «evidencia fuerte» o «sólida».")
-    c.metric("Tendencias reales que sí detecta", "78 a 98 %",
-             help="Series con una tendencia real de 0.2 desviaciones estándar por década, en 45 años.")
-    st.caption("Los datos del clima tienen «memoria»: cada mes se parece al anterior. La prueba "
-               "común no lo toma en cuenta y ve tendencias donde no las hay. El detective sí la corrige.")
-
-    st.subheader("¿Y si comparas dos lugares?")
-    st.markdown("El mismo fenómeno puede subir en una región y bajar en otra. En el **careo** pones "
-                "dos lugares frente a frente.")
-    st.button("Ir al careo", on_click=_ir_a, args=(MODOS[2],))
-    metodo()
-
-
-def main() -> None:
-    st.title("Expediente Tierra")
-    st.markdown("Elige un lugar del planeta. Descubre **qué** está cambiando ahí, **dónde**, "
-                "**cuánto**, y si la evidencia aguanta un interrogatorio.")
-    if "modo" not in st.session_state:  # un enlace directo a un caso o a un careo se salta la portada
-        st.session_state["modo"] = MODOS[2] if _parametro("careo") else MODOS[1] if _parametro("caso") else MODOS[0]
-    modo = st.sidebar.radio("¿Qué quieres hacer?", MODOS, key="modo")
-    if modo == MODOS[0]:
-        pagina_inicio()
-        return
-    if modo == MODOS[2]:
-        pagina_careo()
-        return
-
+def pagina_analisis() -> None:
     guiado = st.session_state.get("guiado")
     if guiado:
-        lugar = guiado["lugar"]
-        st.sidebar.markdown(f"**Caso abierto desde la guía**  \n{lugar['nombre']}  \nTe preocupa: "
+        sitio = guiado["sitio"]
+        st.sidebar.markdown(f"**Sitio de estudio**  \n{sitio['nombre']}  \nTema de interés: "
                             f"{guiado['tema'].lower()}.")
-        if st.sidebar.button("Elegir otro lugar"):
+        if st.sidebar.button("Cambiar de sitio"):
             del st.session_state["guiado"]
             st.rerun()
     else:
-        lugar = elegir_lugar()
-    if lugar is None:
-        st.info("Escribe un lugar en la barra lateral para abrir un caso.")
+        sitio = elegir_sitio()
+    if sitio is None:
+        encabezado("Análisis de un lugar", "Elige un sitio de estudio")
+        st.info("Escribe un lugar en la barra lateral para empezar.")
         return
 
+    encabezado("Análisis de un lugar", sitio["nombre"])
     try:
-        with st.spinner("Pidiendo los datos a la NASA..."):
-            tabla_datos = cargar_datos(lugar["lat"], lugar["lon"])
-            sospechosos = cargar_sospechosos(lugar["lat"], lugar["lon"])
+        with st.spinner("Descargando los datos..."):
+            tabla_datos = cargar_datos(sitio["lat"], sitio["lon"])
+            exploracion = cargar_exploracion(sitio["lat"], sitio["lon"])
     except datos.ErrorDeDatos as error:
         st.error(f"No se pudieron obtener los datos. {error}")
         return
 
-    paso_lugar(lugar, tabla_datos)
+    paso_sitio(sitio, tabla_datos)
     preferidas = tuple(TEMAS[guiado["tema"]]) if guiado else ()
-    codigo = paso_sospechosos(sospechosos, preferidas)
+    codigo = paso_exploracion(exploracion, preferidas)
     if codigo is None:
         return
-    # La apuesta se hizo sobre el primer sospechoso de la guía; si se cambia de sospechoso ya no aplica.
-    validos = set(sospechosos.dropna(subset=["estandarizada"])["codigo"])
-    apostado = next((c for c in preferidas if c in validos), None) if guiado else None
-    if guiado and not preferidas:
-        apostado = sospechosos.dropna(subset=["estandarizada"])["codigo"].iloc[0]
-    apuesta = guiado["apuesta"] if guiado and codigo == apostado else None
+    # La hipótesis se planteó sobre la primera variable del tema; si se cambia de variable ya no aplica.
+    validas = list(exploracion.dropna(subset=["estandarizada"])["codigo"])
+    planteada = next((c for c in preferidas if c in validas), validas[0]) if guiado else None
+    hipotesis = guiado["hipotesis"] if guiado and codigo == planteada else None
 
-    lado = paso_mapa(lugar, codigo)
+    lado = paso_mapa(sitio, codigo)
     alcance = "El punto"
     if lado is not None:
-        alcance = st.radio("¿A quién interrogamos?", ["El punto", "El promedio de toda la región"],
-                           horizontal=True)
+        alcance = st.radio("Serie que se analiza", ["El punto", "El promedio de la región"], horizontal=True)
     try:
         if alcance == "El punto":
-            r = cargar_interrogatorio(lugar["lat"], lugar["lon"], codigo)
+            r = cargar_analisis(sitio["lat"], sitio["lon"], codigo)
         else:
-            r = cargar_interrogatorio_regional(lugar["lat"], lugar["lon"], codigo, lado)
-            lugar = {**lugar, "nombre": f"Región de {lado}° × {lado}° alrededor de {lugar['nombre']}"}
+            r = cargar_analisis_regional(sitio["lat"], sitio["lon"], codigo, lado)
+            sitio = {**sitio, "nombre": f"Región de {lado}° × {lado}° alrededor de {sitio['nombre']}"}
     except caso.CasoImposible as error:
         st.warning(str(error))
         return
-    paso_interrogatorio(r)
-    paso_veredicto(r, lugar, apuesta)
+    paso_serie(r)
+    paso_resultado(r, sitio, hipotesis)
     metodo()
 
 
-main()
+# ------------------------------------------------------------------ página: comparación
+
+def _sitio_a_comparar(barra, etiqueta: str, indice: int) -> dict | None:
+    opciones = [e["nombre"] for e in EJEMPLOS] + ["Otro lugar"]
+    elegido = barra.selectbox(etiqueta, opciones, index=indice)
+    if elegido != opciones[-1]:
+        return EJEMPLOS[opciones.index(elegido)]
+    return _buscar_sitio(barra, f"{etiqueta}: ciudad, región o país", etiqueta)
+
+
+def pagina_comparacion() -> None:
+    barra = st.sidebar
+    barra.markdown("**Comparación**")
+    titulos = [c[0] for c in COMPARACIONES] + ["Definir mi propia comparación"]
+    inicial = int(_parametro("comp")) if _parametro("comp").isdigit() else 0
+    elegida = barra.selectbox("Comparación", titulos, index=min(inicial, len(titulos) - 1),
+                              label_visibility="collapsed")
+    if elegida != titulos[-1]:
+        _, i, j, codigo, pregunta = COMPARACIONES[titulos.index(elegida)]
+        sitio_a, sitio_b = EJEMPLOS[i], EJEMPLOS[j]
+        barra.markdown(f"**Pregunta de investigación.** {pregunta}")
+    else:
+        sitio_a = _sitio_a_comparar(barra, "Lugar A", 0)
+        sitio_b = _sitio_a_comparar(barra, "Lugar B", 3)
+        if sitio_a is None or sitio_b is None:
+            encabezado("Comparación de dos lugares", "Elige dos lugares")
+            st.info("Elige los dos lugares en la barra lateral.")
+            return
+        try:
+            with st.spinner("Descargando los datos..."):
+                validas = [cargar_exploracion(s["lat"], s["lon"]).dropna(subset=["estandarizada"])["codigo"]
+                           for s in (sitio_a, sitio_b)]
+        except datos.ErrorDeDatos as error:
+            st.error(f"No se pudieron obtener los datos. {error}")
+            return
+        comunes = [v.codigo for v in CATALOGO if v.codigo in set(validas[0]) & set(validas[1])]
+        if not comunes:
+            st.warning("Estos dos lugares no tienen ninguna variable medible en común.")
+            return
+        codigo = barra.selectbox("Variable", comunes, format_func=lambda c: POR_CODIGO[c].nombre)
+    if sitio_a["nombre"] == sitio_b["nombre"]:
+        st.info("Elige dos lugares distintos para comparar.")
+        return
+
+    v = POR_CODIGO[codigo]
+    nombre_a, nombre_b = sitio_a["nombre"], sitio_b["nombre"]
+    encabezado("Comparación de dos lugares", v.nombre, f"{nombre_a} y {nombre_b}.")
+    texto, definicion = st.columns([5, 2], vertical_alignment="center")
+    texto.markdown(f"{v.definicion}  \nFuente: {v.fuente}.")
+    definicion_emergente(definicion, v)
+    alcance = st.radio("Serie que se analiza en cada lugar",
+                       ["El punto", "El promedio de la región (8° × 8°)"], horizontal=True)
+    try:
+        with st.spinner("Analizando los dos lugares..."):
+            if alcance == "El punto":
+                a = cargar_analisis(sitio_a["lat"], sitio_a["lon"], codigo)
+                b = cargar_analisis(sitio_b["lat"], sitio_b["lon"], codigo)
+            else:
+                a = cargar_analisis_regional(sitio_a["lat"], sitio_a["lon"], codigo, 8)
+                b = cargar_analisis_regional(sitio_b["lat"], sitio_b["lon"], codigo, 8)
+    except (caso.CasoImposible, datos.ErrorDeDatos, KeyError) as error:
+        st.warning(f"No se puede hacer esta comparación: en uno de los lugares la variable no "
+                   f"se puede medir. {error}")
+        return
+
+    seccion(1, "Resultado")
+    with st.container(border=True):
+        st.html(f'<div class="et-resultado">{veredicto.comparar(a, b, nombre_a, nombre_b)}</div>')
+
+    seccion(2, "Series de tiempo")
+    plotly(graficas.comparacion(a, b, nombre_a, nombre_b))
+    st.caption("La curva es la media móvil de 12 meses de las anomalías (sin ciclo estacional); la "
+               "recta es la tendencia lineal. Cada lugar se compara con su propia climatología, por "
+               "eso las dos series se centran en cero aunque sus valores absolutos sean distintos.")
+
+    seccion(3, "Distribución espacial")
+    mapas = []
+    for sitio in (sitio_a, sitio_b):
+        try:
+            mapas.append(cargar_mapa(sitio["lat"], sitio["lon"], codigo, 8))
+        except datos.ErrorDeDatos:
+            mapas.append(pd.DataFrame())
+    # Los dos mapas comparten la escala de color: el mismo tono significa el mismo cambio.
+    tope = max((float(m["pendiente_decada"].abs().max()) for m in mapas if not m.empty), default=None)
+    for columna, r, sitio, mapa in zip(st.columns(2), (a, b), (sitio_a, sitio_b), mapas):
+        with columna.container(border=True):
+            st.markdown(f"**{sitio['nombre']}**")
+            izq, der = st.columns(2)
+            cifra(izq, "Tasa de cambio", caso.numero(r.pendiente_decada, signo=True), f"{v.unidad} por década")
+            cifra(der, "Nivel de evidencia", caso.NIVELES_CORTOS[r.nivel],
+                  f"{r.aprobadas} de {caso.N_PRUEBAS} pruebas superadas")
+            st.caption(veredicto.redactar(r).cuanto)
+            if not mapa.empty:
+                resumen = region.resumen(mapa)
+                plotly(graficas.mapa(mapa, v.unidad, sitio["lat"], sitio["lon"], tope=tope, alejar=0.4),
+                       clave=f"mapa_{sitio['nombre']}")
+                st.caption(f"En la región: tendencia positiva significativa en {resumen['sube']:.0f} % "
+                           f"de las celdas y negativa en {resumen['baja']:.0f} %.")
+    st.caption("Las cinco pruebas de significancia de cada lugar están en «Análisis de un lugar».")
+    metodo()
+
+
+# ------------------------------------------------------------------ navegación
+
+st.html(ESTILOS)
+PAGINAS.update({
+    "inicio": st.Page(pagina_inicio, title="Inicio", url_path="inicio", default=True),
+    "variables": st.Page(pagina_variables, title="Variables", url_path="variables"),
+    "analisis": st.Page(pagina_analisis, title="Análisis de un lugar", url_path="analisis"),
+    "comparacion": st.Page(pagina_comparacion, title="Comparación de dos lugares", url_path="comparacion"),
+})
+st.navigation(list(PAGINAS.values()), position="top").run()

@@ -1,7 +1,8 @@
-"""El caso: de los datos crudos al veredicto.
+"""Del dato crudo al resultado.
 
-`escanear` arma la rueda de sospechosos (qué variables cambian más en un lugar) e
-`interrogar` somete una variable a las cinco pruebas y dicta el nivel de evidencia.
+`escanear` ordena las variables de un sitio por la magnitud de su tendencia e
+`interrogar` aplica las cinco pruebas de significancia a una variable y asigna el nivel
+de evidencia.
 """
 
 from __future__ import annotations
@@ -26,10 +27,10 @@ N_PRUEBAS = 5
 NIVELES = {
     "solida": "Evidencia sólida",
     "fuerte": "Evidencia fuerte",
-    "indicios": "Solo indicios",
+    "indicios": "Evidencia débil",
     "sin": "Sin evidencia suficiente",
 }
-NIVELES_CORTOS = {"solida": "Sólida", "fuerte": "Fuerte", "indicios": "Indicios", "sin": "Insuficiente"}
+NIVELES_CORTOS = {"solida": "Sólida", "fuerte": "Fuerte", "indicios": "Débil", "sin": "Insuficiente"}
 
 
 class CasoImposible(ValueError):
@@ -195,69 +196,72 @@ def interrogar(serie_mensual: pd.Series, variable: Variable) -> Interrogatorio:
     if mensual:
         mk_anual = est.mann_kendall_sin_memoria(anios, anual.to_numpy())
         cuarta = Prueba(
-            "Promedios anuales",
-            "¿La tendencia sigue ahí con un solo dato por año?",
+            "Agregación anual",
+            "¿La tendencia se mantiene con un solo dato por año?",
             _mk_confirma(mk_anual, signo),
             f"{valor_p(mk_anual.prueba.p)} con {len(anual)} años",
-            "Se repite Mann-Kendall con el promedio de cada año: son menos datos, pero sin "
-            "estaciones y casi sin memoria. Una tendencia real debería sobrevivir.",
+            "Se repite la prueba de Mann-Kendall sobre los promedios anuales: son menos datos, "
+            "pero sin ciclo estacional y casi sin autocorrelación. Una tendencia real debe "
+            "mantenerse.",
         )
     else:
         sobrevive, fallos = _sobrevive_sin_un_anio(anios, anual.to_numpy(), signo)
         cuarta = Prueba(
-            "Sin un año clave",
-            "¿La tendencia sigue ahí si se borra cualquier año?",
+            "Sensibilidad a un año",
+            "¿La tendencia se mantiene si se excluye cualquier año?",
             sobrevive,
-            "sobrevive al quitar cualquier año" if sobrevive
-            else f"deja de ser significativa al quitar {fallos} de {len(anual)} años",
-            "Se repite Mann-Kendall quitando un año a la vez. Si la tendencia desaparece "
-            "al borrar un solo año, dependía de un año raro y no de un cambio sostenido.",
+            "se mantiene al excluir cualquier año" if sobrevive
+            else f"deja de ser significativa al excluir {fallos} de {len(anual)} años",
+            "Se repite la prueba de Mann-Kendall excluyendo un año a la vez (validación "
+            "dejando uno fuera). Si la tendencia desaparece al excluir un solo año, dependía "
+            "de un valor atípico y no de un cambio sostenido.",
         )
 
     u = variable.unidad
     pruebas = (
         Prueba(
-            "Mann-Kendall",
-            "¿Los valores suben (o bajan) más seguido de lo que explicaría el azar?",
+            "Prueba de Mann-Kendall",
+            "¿Los valores aumentan (o disminuyen) con más frecuencia de la que explicaría el azar?",
             _mk_confirma(mk, signo),
-            f"{valor_p(mk.prueba.p)} · pendiente robusta (Sen): "
+            f"{valor_p(mk.prueba.p)} · pendiente de Theil-Sen: "
             f"{numero(sen * 10, signo=True)} {u} por década",
             f"Compara cada {dato} con todos los posteriores y cuenta cuántas veces el valor "
-            f"subió y cuántas bajó. Antes se le quita la «memoria» a la serie (cada {dato} "
-            f"se parece al anterior), porque esa memoria hace que la prueba vea tendencias "
-            f"donde no las hay. La pendiente de Sen es la mediana de las pendientes entre "
-            f"todos los pares de datos: casi no le afectan los valores extremos.",
+            f"aumentó y cuántas disminuyó. Antes se corrige la autocorrelación de la serie "
+            f"(cada {dato} se parece al anterior) mediante preblanqueo, porque sin esa "
+            f"corrección la prueba detecta tendencias que no existen. La pendiente de "
+            f"Theil-Sen es la mediana de las pendientes entre todos los pares de datos y es "
+            f"robusta frente a valores atípicos.",
         ),
         Prueba(
             "Prueba t de la pendiente",
-            "¿La inclinación de la recta es distinta de cero?",
+            "¿La pendiente de la regresión lineal es distinta de cero?",
             regresion.p < est.ALFA and np.sign(regresion.pendiente) == signo,
-            f"{valor_p(regresion.p)} · {regresion.n} {datos_txt} valen como "
-            f"{regresion.n_efectivo:.0f} datos independientes",
-            f"Ajusta una recta a los datos y pregunta si su inclinación podría ser cero. "
-            f"Como los {datos_txt} vecinos se parecen entre sí, no cuentan como datos "
-            f"independientes y la prueba los descuenta.",
+            f"{valor_p(regresion.p)} · tamaño de muestra efectivo: {regresion.n_efectivo:.0f} "
+            f"de {regresion.n} {datos_txt}",
+            f"Ajusta una recta por mínimos cuadrados y evalúa si su pendiente podría ser cero. "
+            f"Como los {datos_txt} consecutivos están correlacionados, no cuentan como datos "
+            f"independientes: la prueba usa el tamaño de muestra efectivo.",
         ),
         Prueba(
-            "Intervalo de confianza",
-            "¿El rango de pendientes creíbles deja fuera al cero?",
+            "Intervalo de confianza del 95 %",
+            "¿El intervalo de confianza de la pendiente excluye el cero?",
             (ic_historias[0] > 0 or ic_historias[1] < 0) and np.sign(ic_historias[0]) == signo,
             f"de {numero(ic_historias[0] * 10, signo=True)} a "
             f"{numero(ic_historias[1] * 10, signo=True)} {u} por década",
-            "Se simulan 2,000 historias alternativas con el mismo ruido y la misma memoria "
-            "que la serie real. Si el 95 % de sus pendientes cae del mismo lado del cero, "
-            "la dirección del cambio es confiable.",
+            "Se generan 2,000 series simuladas (bootstrap) con la misma variabilidad y la "
+            "misma autocorrelación que la serie real. Si el 95 % de sus pendientes queda del "
+            "mismo lado del cero, el signo de la tendencia es confiable.",
         ),
         cuarta,
         Prueba(
-            "Cambio de fechas",
-            "¿La dirección se mantiene si se cambia el año de inicio o de fin?",
+            "Sensibilidad al periodo",
+            "¿El signo de la tendencia se mantiene al cambiar el año inicial o final?",
             fraccion >= MIN_FRACCION_VENTANAS,
-            f"{100 * fraccion:.0f} % de {len(triangulo)} periodos van en la misma dirección",
+            f"{100 * fraccion:.0f} % de {len(triangulo)} periodos conservan el signo",
             f"Se recalcula la tendencia para todos los periodos posibles de al menos "
-            f"{largo_min} años. Si la dirección depende de las fechas elegidas, alguien "
-            f"podría «demostrar» lo que quisiera escogiendo dónde empezar a contar. "
-            f"Se pide que al menos {100 * MIN_FRACCION_VENTANAS:.0f} % coincida.",
+            f"{largo_min} años. Si el signo depende de las fechas elegidas, el resultado es "
+            f"sensible a la selección del periodo. Se exige que al menos "
+            f"{100 * MIN_FRACCION_VENTANAS:.0f} % de los periodos coincida.",
         ),
     )
 
@@ -271,7 +275,7 @@ def interrogar(serie_mensual: pd.Series, variable: Variable) -> Interrogatorio:
 
 
 def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO) -> pd.DataFrame:
-    """Rueda de sospechosos: tendencia de cada variable, comparable entre variables.
+    """Exploración de variables: tendencia de cada una, en una escala comparable.
 
     Usa promedios anuales. `estandarizada` es la pendiente por década dividida entre la
     variación típica de un año a otro, así que un cambio de temperatura y uno de lluvia

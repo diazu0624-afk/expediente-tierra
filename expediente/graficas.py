@@ -1,4 +1,4 @@
-"""Gráficas del expediente (Plotly). Un solo eje por gráfica; el color significa dirección."""
+"""Gráficas (Plotly). Un solo eje por gráfica; el color significa signo de la tendencia."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from . import estadistica as est
-from .caso import Interrogatorio, numero, valor_p
+import textwrap
 
-SUPERFICIE = "#fcfcfb"
+from .caso import Interrogatorio, numero, valor_p
+from .variables import POR_CODIGO
+
+SUPERFICIE = "#ffffff"
 TINTA = "#0b0b0b"
 TINTA_2 = "#52514e"
 TENUE = "#898781"
@@ -19,9 +22,11 @@ EJE = "#c3c2b7"
 ROJO, ROJO_CLARO = "#e34948", "#f3b3b2"
 AZUL, AZUL_CLARO = "#2a78d6", "#9ec5f4"
 DIVERGENTE = [[0, "#184f95"], [0.25, "#6da7ec"], [0.5, "#f0efec"], [0.75, "#ee8f8e"], [1, "#b12b2b"]]
-# Identidad de los dos lugares de un careo (no significan dirección).
+# Identidad de los dos lugares de una comparación (no significan signo).
 LUGAR_A, LUGAR_B = "#2a78d6", "#eb6834"
-FUENTE = 'system-ui, -apple-system, "Segoe UI", sans-serif'
+# Tipografía web de la NASA: Public Sans para texto, DM Mono para cifras.
+FUENTE = '"Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif'
+FUENTE_CIFRAS = '"DM Mono", ui-monospace, Menlo, monospace'
 
 
 def _base(fig: go.Figure, alto: int) -> go.Figure:
@@ -36,47 +41,52 @@ def _base(fig: go.Figure, alto: int) -> go.Figure:
         legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="left", x=0,
                     font=dict(color=TINTA_2), bgcolor="rgba(0,0,0,0)"),
     )
+    cifras = dict(family=FUENTE_CIFRAS, size=11, color=TENUE)
     fig.update_xaxes(automargin=True, showgrid=False, linecolor=EJE, ticks="outside", tickcolor=EJE,
-                     tickfont=dict(color=TENUE), title_font=dict(color=TINTA_2), title_standoff=10)
+                     tickfont=cifras, title_font=dict(color=TINTA_2, size=12), title_standoff=10)
     fig.update_yaxes(automargin=True, gridcolor=REJILLA, zeroline=False, showline=False,
-                     tickfont=dict(color=TENUE), title_font=dict(color=TINTA_2), title_standoff=10)
+                     tickfont=cifras, title_font=dict(color=TINTA_2, size=12), title_standoff=10)
     return fig
 
 
-def sospechosos(tabla: pd.DataFrame) -> go.Figure:
-    """Barras horizontales: la tendencia de cada variable en una escala común."""
+def exploracion(tabla: pd.DataFrame) -> go.Figure:
+    """Barras horizontales: la tendencia estandarizada de cada variable.
+
+    Al pasar el cursor por una barra aparece la definición corta de la variable.
+    """
     datos = tabla.dropna(subset=["estandarizada"]).iloc[::-1]  # la más fuerte queda arriba
     fig = go.Figure()
     grupos = [
-        ("Sube · significativa", True, True, ROJO),
-        ("Sube · no significativa", True, False, ROJO_CLARO),
-        ("Baja · significativa", False, True, AZUL),
-        ("Baja · no significativa", False, False, AZUL_CLARO),
+        ("Positiva · significativa", True, True, ROJO),
+        ("Positiva · no significativa", True, False, ROJO_CLARO),
+        ("Negativa · significativa", False, True, AZUL),
+        ("Negativa · no significativa", False, False, AZUL_CLARO),
     ]
     for nombre, sube, significativa, color in grupos:
         g = datos[((datos["estandarizada"] > 0) == sube) & (datos["significativa"] == significativa)]
         detalle = [
+            "<i>" + "<br>".join(textwrap.wrap(POR_CODIGO[f.codigo].definicion, 62)) + "</i><br><br>"
             f"{numero(f.pendiente_decada, signo=True)} {f.unidad} por década<br>"
-            f"{valor_p(f.p_ajustada)} (ajustado por revisar {len(datos)} variables)"
+            f"{valor_p(f.p_ajustada)} (ajustado por comparar {len(datos)} variables)"
             for f in g.itertuples()
         ]
         fig.add_bar(
             name=nombre, y=g["nombre"], x=g["estandarizada"], orientation="h", width=0.62,
             marker=dict(color=color, cornerradius=4),
             text=[f"{x:+.2f}" for x in g["estandarizada"]] if significativa else None,
-            textposition="outside", textfont=dict(color=TINTA_2, size=12), cliponaxis=False,
+            textposition="outside", textfont=dict(color=TINTA_2, size=11, family=FUENTE_CIFRAS), cliponaxis=False,
             customdata=detalle,
-            hovertemplate="<b>%{y}</b><br>%{customdata}<br>En escala común: %{x:+.2f}<extra></extra>",
+            hovertemplate="<b>%{y}</b><br>%{customdata}<br>Tendencia estandarizada: %{x:+.2f}<extra></extra>",
         )
     tope = float(datos["estandarizada"].abs().max()) * 1.18 if len(datos) else 1.0
     _base(fig, alto=26 * len(datos) + 110)
     fig.update_layout(barmode="overlay", legend_traceorder="normal")
     fig.update_xaxes(
         range=[-tope, tope], zeroline=True, zerolinecolor=EJE, zerolinewidth=1, showline=False,
-        title_text="Tendencia por década, medida en variaciones típicas de un año a otro",
+        title_text="Tendencia estandarizada (desviaciones estándar interanuales por década)",
     )
     fig.update_yaxes(showgrid=False, categoryorder="array", categoryarray=list(datos["nombre"]),
-                     tickfont=dict(color=TINTA_2), ticks="")
+                     tickfont=dict(color=TINTA_2, family=FUENTE, size=12.5), ticks="")
     return fig
 
 
@@ -114,28 +124,28 @@ def tendencia(r: Interrogatorio) -> go.Figure:
                     hoverinfo="skip", showlegend=False)
     fig.add_scatter(x=x, y=np.maximum(borde_a, borde_b), mode="lines", line=dict(width=0),
                     fill="tonexty", fillcolor="rgba(11,11,11,0.10)", hoverinfo="skip",
-                    name="Rango creíble de la tendencia (95 %)", legendrank=4)
+                    name="Intervalo de confianza del 95 %", legendrank=4)
     if mensual:
-        fig.add_scatter(x=x, y=r.anomalias, mode="lines", name="Cada mes", legendrank=1,
+        fig.add_scatter(x=x, y=r.anomalias, mode="lines", name="Anomalía mensual", legendrank=1,
                         line=dict(color=EJE, width=1),
                         hovertemplate="%{x|%b %Y}: %{y:+.2f} " + u + "<extra></extra>")
         suave = r.anomalias.rolling(12, center=True).mean()
-        fig.add_scatter(x=x, y=suave, mode="lines", name="Promedio de 12 meses", legendrank=2,
+        fig.add_scatter(x=x, y=suave, mode="lines", name="Media móvil de 12 meses", legendrank=2,
                         line=dict(color=AZUL, width=2),
                         hovertemplate="12 meses alrededor de %{x|%b %Y}: %{y:+.2f} " + u + "<extra></extra>")
     else:
-        fig.add_scatter(x=x, y=r.anual, mode="lines+markers", name="Promedio de cada año", legendrank=2,
+        fig.add_scatter(x=x, y=r.anual, mode="lines+markers", name="Promedio anual", legendrank=2,
                         line=dict(color=AZUL, width=2),
                         marker=dict(size=8, color=AZUL, line=dict(color=SUPERFICIE, width=2)),
                         hovertemplate="%{x}: %{y:.2f} " + u + "<extra></extra>")
-    fig.add_scatter(x=x, y=recta, mode="lines", name="Tendencia", legendrank=3,
+    fig.add_scatter(x=x, y=recta, mode="lines", name="Tendencia lineal", legendrank=3,
                     line=dict(color=TINTA, width=2), hoverinfo="skip")
 
     _base(fig, alto=380)
     fig.update_layout(legend_traceorder="normal")
     if mensual:
         fig.add_hline(y=0, line_color=EJE, line_width=1)
-        fig.update_yaxes(title_text=f"Diferencia con lo normal del mes ({u})")
+        fig.update_yaxes(title_text=f"Anomalía respecto a la climatología ({u})")
     else:
         fig.update_yaxes(title_text=u)
     return fig
@@ -161,11 +171,11 @@ def triangulo(r: Interrogatorio) -> go.Figure:
     firmes = tri[tri["p"] < est.ALFA]
     fig.add_scatter(x=firmes["inicio"], y=firmes["fin"], mode="markers", hoverinfo="skip",
                     marker=dict(size=3, color=TINTA, opacity=0.55),
-                    name="Periodo con tendencia significativa")
+                    name="Periodo con tendencia significativa (p < 0.05)")
     _base(fig, alto=440)
     fig.update_layout(showlegend=True)
-    fig.update_xaxes(title_text="Año en que se empieza a contar", ticks="", showline=False)
-    fig.update_yaxes(title_text="Año en que se termina", showgrid=False)
+    fig.update_xaxes(title_text="Año inicial del periodo", ticks="", showline=False)
+    fig.update_yaxes(title_text="Año final del periodo", showgrid=False)
     return fig
 
 
@@ -205,7 +215,7 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
     fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
                        marker=dict(size=14, color=SUPERFICIE), showlegend=False)
     fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
-                       marker=dict(size=9, color=TINTA), name="El lugar del caso")
+                       marker=dict(size=9, color=TINTA), name="Sitio de estudio")
     _base(fig, alto=480)
     # Acercamiento para que el recuadro completo quepa a lo alto (el mapa se estira hacia los polos).
     alto_grados = (lats.max() - lats.min() + alto_celda) / np.cos(np.radians(float(lats.mean())))
@@ -217,8 +227,8 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
     return fig
 
 
-def _para_careo(r: Interrogatorio) -> tuple[pd.Index, pd.Series, np.ndarray]:
-    """Fechas, serie suavizada y recta de tendencia, todo como diferencia con lo normal."""
+def _para_comparar(r: Interrogatorio) -> tuple[pd.Index, pd.Series, np.ndarray]:
+    """Fechas, serie suavizada y recta de tendencia, todo como anomalía."""
     if r.resolucion == "mensual":
         return (r.anomalias.index, r.anomalias.rolling(12, center=True).mean(),
                 r.regresion.intercepto + r.regresion.pendiente * r.t)
@@ -227,12 +237,12 @@ def _para_careo(r: Interrogatorio) -> tuple[pd.Index, pd.Series, np.ndarray]:
     return fechas, r.anual - normal, r.regresion.intercepto + r.regresion.pendiente * r.t - normal
 
 
-def careo(a: Interrogatorio, b: Interrogatorio, nombre_a: str, nombre_b: str) -> go.Figure:
+def comparacion(a: Interrogatorio, b: Interrogatorio, nombre_a: str, nombre_b: str) -> go.Figure:
     """La misma variable en dos lugares, sobre un mismo eje: curva suavizada y recta de tendencia."""
     u = a.variable.unidad
     fig = go.Figure()
     for r, nombre, color in ((a, nombre_a, LUGAR_A), (b, nombre_b, LUGAR_B)):
-        fechas, suave, recta = _para_careo(r)
+        fechas, suave, recta = _para_comparar(r)
         fig.add_scatter(x=fechas, y=suave, mode="lines", name=nombre, legendgroup=nombre,
                         line=dict(color=color, width=1.5), opacity=0.55,
                         hovertemplate=nombre + ", %{x|%b %Y}: %{y:+.3g} " + u + "<extra></extra>")
@@ -240,9 +250,9 @@ def careo(a: Interrogatorio, b: Interrogatorio, nombre_a: str, nombre_b: str) ->
                         line=dict(color=color, width=2.5), hoverinfo="skip")
         fig.add_annotation(x=fechas[-1], y=float(recta[-1]), xanchor="left", xshift=8, showarrow=False,
                            text=f"{numero(r.pendiente_decada, signo=True)}<br>por década",
-                           font=dict(color=TINTA_2, size=12), align="left")
+                           font=dict(color=TINTA_2, size=11, family=FUENTE_CIFRAS), align="left")
     _base(fig, alto=400)
     fig.add_hline(y=0, line_color=EJE, line_width=1)
     fig.update_layout(margin_r=90, legend_traceorder="normal")
-    fig.update_yaxes(title_text=f"Diferencia con lo normal de cada lugar ({u})")
+    fig.update_yaxes(title_text=f"Anomalía respecto a la climatología de cada lugar ({u})")
     return fig

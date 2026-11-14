@@ -1,9 +1,22 @@
 [theme]
 base = "light"
-primaryColor = "#2a78d6"
-backgroundColor = "#f9f9f7"
-secondaryBackgroundColor = "#f0efec"
+primaryColor = "#0b3d91"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f2"
 textColor = "#0b0b0b"
+linkColor = "#0b3d91"
+borderColor = "#d9d8d2"
+# Tipografía web de la NASA (Horizon Design System): Inter para títulos, Public Sans para
+# texto y DM Mono para cifras y etiquetas. Las fuentes se cargan en app.py.
+font = "'Public Sans', system-ui, sans-serif"
+headingFont = "Inter, system-ui, sans-serif"
+codeFont = "'DM Mono', ui-monospace, monospace"
+baseRadius = "0.125rem"
+buttonRadius = "0.125rem"
+showSidebarBorder = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

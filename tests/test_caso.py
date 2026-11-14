@@ -44,7 +44,7 @@ def test_fenomeno_de_temporada_se_interroga_por_anio():
     serie[~serie.index.month.isin([12, 1, 2, 3])] = 0.0
     r = caso.interrogar(serie.clip(lower=0).round(2), POR_CODIGO["FROST_DAYS"])
     assert r.resolucion == "anual"
-    assert r.pruebas[3].nombre == "Sin un año clave"
+    assert r.pruebas[3].nombre == "Sensibilidad a un año"
     assert not r.sube and r.nivel in ("solida", "fuerte")
     assert r.anios_de_datos == 40
 
@@ -157,9 +157,18 @@ def test_careo_distingue_opuestos_ritmos_y_un_solo_cambio():
     sube_rapido = caso.interrogar(_serie(0.15, semilla=2), t2m)
     baja = caso.interrogar(_serie(-0.05, semilla=3), t2m)
     quieto = caso.interrogar(_serie(0.0, semilla=3), t2m)
-    assert veredicto.comparar(sube, baja, "A", "B").startswith("Direcciones opuestas: sube en A")
+    assert veredicto.comparar(sube, baja, "A", "B").startswith("Tendencias opuestas: sube en A")
     ritmo = veredicto.comparar(sube, sube_rapido, "A", "B")
-    assert ritmo.startswith("Misma dirección") and "pero en B lo hace" in ritmo
+    assert ritmo.startswith("Mismo signo") and "pero en B lo hace" in ritmo
     solo = veredicto.comparar(quieto, baja, "A", "B")
-    assert solo.startswith("Solo un lugar cambia: baja en B") and "en A no hay evidencia" in solo
+    assert solo.startswith("Tendencia en un solo lugar: baja en B") and "en A no hay evidencia" in solo
     assert veredicto.comparar(quieto, quieto, "A", "B").startswith("Ninguno")
+
+
+def test_cada_variable_tiene_ficha_completa_y_referencias_validas():
+    from expediente.variables import METODOS, REFERENCIAS
+    for v in CATALOGO:
+        assert v.tecnica.endswith(".") and v.producto.endswith(".") and v.resolucion
+        assert v.referencias and all(clave in REFERENCIAS for clave in v.referencias), v.codigo
+    assert all(clave in REFERENCIAS for clave in METODOS)
+    assert all(r.url.startswith("https://") for r in REFERENCIAS.values())

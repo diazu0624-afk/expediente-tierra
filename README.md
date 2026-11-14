@@ -25,14 +25,14 @@ python -m venv .venv
 .venv\Scripts\streamlit run app.py
 ```
 
-Se abre en http://localhost:8501. Los seis casos de demostración funcionan sin cuentas ni
+Se abre en http://localhost:8501. Los seis sitios de ejemplo funcionan sin cuentas ni
 llaves, porque sus datos ya vienen guardados en `cache_power/`.
 
 ### Datos de satélite en lugares nuevos (opcional)
 
 Las variables del modelo MERRA-2 salen de la API pública de NASA POWER y funcionan en
 cualquier lugar. Las de satélite (lluvia de GPM, vegetación de MODIS, agua de GRACE) salen
-de Google Earth Engine; para verlas en un lugar que no sea un caso de demostración hace
+de Google Earth Engine; para verlas en un lugar que no sea un sitio de ejemplo hace
 falta una cuenta con acceso a un proyecto de Earth Engine:
 
 ```bash
@@ -46,14 +46,14 @@ Sin esa sesión la app sigue funcionando; solo avisa que los satélites no está
 
 | Archivo | Qué hace |
 |---|---|
-| `app.py` | La interfaz (Streamlit): lugar, rueda de sospechosos, interrogatorio, veredicto. |
-| `expediente/variables.py` | Catálogo de variables con su definición en lenguaje sencillo. |
+| `app.py` | La interfaz (Streamlit): inicio, catálogo de variables, análisis de un lugar y comparación de dos lugares. |
+| `expediente/variables.py` | Catálogo de variables (definición corta y técnica, producto de datos) y referencias con DOI. |
 | `expediente/datos.py` | Descarga las series mensuales de NASA POWER (punto y región) y busca lugares por nombre. |
 | `expediente/datos_gee.py` | Descarga GPM, MODIS y GRACE desde Google Earth Engine. |
 | `expediente/region.py` | Mapa de tendencias celda por celda y promedio regional. |
 | `expediente/estadistica.py` | Las pruebas: Mann-Kendall, prueba t, intervalos, corrección de memoria. |
-| `expediente/caso.py` | Arma la rueda de sospechosos y aplica las cinco pruebas a una variable. |
-| `expediente/veredicto.py` | Redacta el veredicto y el expediente descargable. |
+| `expediente/caso.py` | Explora las variables de un sitio y aplica las cinco pruebas de significancia a una. |
+| `expediente/veredicto.py` | Redacta el resultado y el informe descargable. |
 | `expediente/graficas.py` | Las gráficas (Plotly). |
 | `validacion/` | Simulaciones que miden qué tan seguido se equivocan las pruebas. |
 | `tests/` | Pruebas automáticas. |
@@ -77,9 +77,15 @@ sin internet.
 - **Si es significativo:** cinco pruebas. Mann-Kendall con preblanqueo iterativo
   (Zhang et al., 2000), prueba t con muestra efectiva (Santer et al., 2000), intervalo de
   confianza, repetición con promedios anuales y estabilidad al cambiar las fechas.
-- **Qué variables mirar:** se escanean todas y se ordenan por tendencia estandarizada,
+- **Qué variables mirar:** se exploran todas y se ordenan por tendencia estandarizada,
   con ajuste de Benjamini-Hochberg por comparaciones múltiples.
 - **Cuánto falta para detectarla:** fórmula de Weatherhead et al. (1998).
 
 No se incluyen nubosidad, radiación solar ni albedo: el producto que reparte POWER
 (CERES SYN1deg) tiene saltos artificiales cuando cambian los satélites.
+
+## Diseño
+
+La tipografía sigue el sistema web de la NASA (Horizon Design System): Inter para títulos,
+Public Sans para texto y DM Mono para cifras y etiquetas. No se usa la insignia ni el
+logotipo de la NASA, cuyo uso está restringido por sus lineamientos de marca.
