@@ -16,6 +16,7 @@ from . import estadistica as est
 from .variables import CATALOGO, Variable
 
 MIN_ANIOS = 15
+MIN_MESES = 9  # meses con dato para que un año cuente
 MIN_FRACCION_VENTANAS = 0.8
 # Si un mismo valor (casi siempre el cero: "no nevó", "no heló") ocupa más de esta parte
 # de la serie, las pruebas dejan de ser confiables a esa resolución.
@@ -50,9 +51,18 @@ def valor_p(p: float) -> str:
 
 
 def promedios_anuales(serie: pd.Series) -> pd.Series:
-    """Promedio de cada año que tenga sus 12 meses."""
-    por_anio = serie.groupby(serie.index.year)
-    return por_anio.mean()[por_anio.count() == 12]
+    """Promedio de cada año que tenga al menos MIN_MESES meses con dato.
+
+    Para que un mes faltante no sesgue el promedio (no es lo mismo perder un enero que un
+    julio), se promedian las anomalías y se suma el promedio normal del año. Con los 12
+    meses presentes da exactamente el promedio simple.
+    """
+    serie = serie.dropna()
+    if serie.empty:
+        return pd.Series(dtype=float)
+    anomalias, climatologia = est.quitar_ciclo_estacional(serie)
+    por_anio = anomalias.groupby(anomalias.index.year)
+    return (por_anio.mean() + climatologia.mean())[por_anio.count() >= MIN_MESES]
 
 
 def _parte_repetida(serie: pd.Series) -> float:
@@ -62,7 +72,7 @@ def _parte_repetida(serie: pd.Series) -> float:
 
 def _motivo_imposible(anual: pd.Series) -> str:
     if len(anual) < MIN_ANIOS:
-        return f"Hay menos de {MIN_ANIOS} años completos de datos aquí"
+        return f"Hay menos de {MIN_ANIOS} años de datos aquí"
     if _parte_repetida(anual) > MAX_REPETIDOS:
         return "Casi nunca ocurre o casi nunca cambia en este lugar"
     return ""

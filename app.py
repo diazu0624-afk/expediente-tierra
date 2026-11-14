@@ -8,30 +8,31 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from expediente import caso, datos, graficas, region, veredicto
+from expediente import caso, datos, datos_gee, graficas, region, veredicto
 from expediente.variables import CATALOGO, POR_CODIGO
 
 st.set_page_config(page_title="Expediente Tierra", page_icon="🔎", layout="wide")
 
 CASOS = [
     {"nombre": "Monterrey, México", "lat": 25.68, "lon": -100.32,
-     "pista": "Monterrey vivió una crisis de agua en 2022. ¿Llueve menos que antes, "
-              "o el sospechoso es otro?"},
+     "pista": "Monterrey vivió una crisis de agua en 2022. ¿Llueve menos que antes? Interroga "
+              "a la lluvia y después al agua almacenada en la tierra (GRACE)."},
     {"nombre": "Nueva Delhi, India", "lat": 28.61, "lon": 77.21,
-     "pista": "Es una de las capitales con el aire más contaminado del mundo. Interroga a "
-              "las partículas en el aire."},
+     "pista": "Alrededor de Delhi se riega una de las zonas agrícolas más grandes del mundo. "
+              "Interroga al verdor de la vegetación y al agua almacenada: ¿van en la misma "
+              "dirección?"},
     {"nombre": "Pekín, China", "lat": 39.90, "lon": 116.40,
-     "pista": "Pekín y Delhi crecieron quemando carbón. Interroga aquí también a las "
-              "partículas en el aire: ¿van en la misma dirección que en Delhi?"},
+     "pista": "Pekín y Delhi crecieron quemando carbón. Interroga en las dos ciudades a las "
+              "partículas en el aire: ¿van en la misma dirección?"},
     {"nombre": "Longyearbyen, Svalbard (Ártico)", "lat": 78.22, "lon": 15.65,
      "pista": "El pueblo más al norte del mundo. Se dice que el Ártico se calienta más "
               "rápido que el resto del planeta. Compara su temperatura con la de Monterrey."},
     {"nombre": "Niamey, Níger (Sahel)", "lat": 13.51, "lon": 2.11,
-     "pista": "El Sahel sufrió sequías devastadoras en los años ochenta. ¿Qué ha pasado "
-              "desde entonces con la humedad del suelo?"},
+     "pista": "El Sahel sufrió sequías devastadoras en los años ochenta. ¿Se recuperó? Mira en "
+              "el mapa el verdor de la vegetación: no toda la región cuenta la misma historia."},
     {"nombre": "Manaos, Brasil (Amazonía)", "lat": -3.10, "lon": -60.02,
      "pista": "En el corazón de la selva más grande del planeta. ¿Está cambiando la lluvia? "
-              "Compárala con lo que pasa en el Sahel."},
+              "Compara lo que dice el modelo (Precipitación) con lo que vio el satélite (GPM)."},
 ]
 
 
@@ -42,7 +43,17 @@ def _parametro(nombre: str) -> str:
 
 @st.cache_data(show_spinner=False)
 def cargar_datos(lat: float, lon: float) -> pd.DataFrame:
-    return datos.descargar_power(lat, lon, [v.codigo for v in CATALOGO])
+    """Todas las variables en el punto: MERRA-2 por POWER más los satélites que respondan."""
+    tabla = datos.descargar_power(lat, lon, [v.codigo for v in CATALOGO if v.origen == "power"])
+    for v in CATALOGO:
+        if v.origen == "gee":
+            try:
+                serie = datos_gee.serie_del_punto(datos_gee.descargar_cubo(lat, lon, v.codigo), lat, lon)
+            except datos.ErrorDeDatos:
+                continue  # sin sesión de Earth Engine: el caso sigue con las demás variables
+            if not serie.empty:
+                tabla = tabla.join(serie.rename(v.codigo), how="outer")
+    return tabla
 
 
 @st.cache_data(show_spinner=False)
@@ -57,6 +68,8 @@ def cargar_interrogatorio(lat: float, lon: float, codigo: str) -> caso.Interroga
 
 @st.cache_data(show_spinner=False)
 def cargar_region(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFrame:
+    if POR_CODIGO[codigo].origen == "gee":
+        return datos_gee.recortar(datos_gee.descargar_cubo(lat, lon, codigo), lat, lon, lado)
     return datos.descargar_region(lat, lon, codigo, lado)
 
 
@@ -109,12 +122,17 @@ def elegir_lugar() -> dict | None:
 def paso_lugar(lugar: dict, tabla_datos: pd.DataFrame) -> None:
     st.subheader("1 · El lugar")
     texto, mapa = st.columns([3, 2])
+    satelites = [v.codigo.split("_")[0] for v in CATALOGO if v.origen == "gee" and v.codigo in tabla_datos]
     texto.markdown(
         f"**{lugar['nombre']}**  \n"
         f"Latitud {lugar['lat']:.2f}, longitud {lugar['lon']:.2f}  \n"
-        f"Datos mensuales de {tabla_datos.index.min():%Y} a {tabla_datos.index.max():%Y}, "
-        f"de la NASA (POWER / MERRA-2)."
+        f"Datos mensuales de {tabla_datos.index.min():%Y} a {tabla_datos.index.max():%Y}: "
+        f"{sum(v.origen == 'power' for v in CATALOGO)} variables del modelo MERRA-2 de la NASA"
+        + (f" y {len(satelites)} de satélite ({', '.join(satelites)})." if satelites else ".")
     )
+    if not satelites:
+        texto.caption("Los datos de satélite (GPM, MODIS, GRACE) no están disponibles: hace falta "
+                      "una sesión de Google Earth Engine en esta computadora.")
     texto.caption("Los datos describen un cuadro de unos 50 km de lado alrededor del punto: "
                   "es el clima de la zona, no el de una calle.")
     mapa.map(pd.DataFrame({"lat": [lugar["lat"]], "lon": [lugar["lon"]]}), zoom=3, height=220)
@@ -212,7 +230,7 @@ def paso_interrogatorio(r: caso.Interrogatorio) -> None:
                        "el vaivén de las estaciones y queda a la vista el cambio de fondo.")
         else:
             st.caption("Este fenómeno solo ocurre parte del año, así que se analiza el promedio "
-                       "de cada año completo.")
+                       "de cada año.")
         st.plotly_chart(graficas.tendencia(r), theme=None, width="stretch",
                         config={"displayModeBar": False})
     with original:
@@ -281,8 +299,10 @@ def metodo() -> None:
     with st.expander("Cómo trabaja el detective (método y validación)"):
         st.markdown(
             """
-**Datos.** Series mensuales de [NASA POWER](https://power.larc.nasa.gov/), que reparte
-variables del reanálisis MERRA-2 para cualquier punto del planeta desde 1981. Para la
+**Datos.** Series mensuales de dos tipos. Del modelo: [NASA POWER](https://power.larc.nasa.gov/)
+reparte variables del reanálisis MERRA-2 para cualquier punto del planeta desde 1981. De
+satélite, por Google Earth Engine: lluvia de GPM IMERG (desde 1998), verdor de la vegetación
+de MODIS (desde 2000) y agua almacenada de GRACE (desde 2002). Para la
 región se pide cada celda de unos 50 km dentro del recuadro y se promedia según su área.
 
 **Cuánto cambia.** La pendiente de una recta ajustada por mínimos cuadrados, con un rango

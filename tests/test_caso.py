@@ -119,3 +119,32 @@ def test_caja_respeta_los_limites_del_planeta():
     from expediente.datos import caja
     assert caja(25.68, -100.32, 8) == (22, 30, -104, -96)
     assert caja(88, 179, 8) == (82, 90, 172, 180)
+
+
+def test_promedio_anual_no_se_sesga_por_un_mes_faltante():
+    serie = _serie(0.0, ruido=0.0)  # solo estaciones: todos los años promedian 20
+    completos = caso.promedios_anuales(serie)
+    assert np.allclose(completos, 20) and len(completos) == 40
+    con_hueco = serie.drop(serie.index[(serie.index.year == 1990) & (serie.index.month == 4)])
+    assert caso.promedios_anuales(con_hueco).loc[1990] == pytest.approx(20)  # el promedio simple daría otro valor
+    assert con_hueco[con_hueco.index.year == 1990].mean() != pytest.approx(20, abs=0.1)
+    # Un año con menos de 9 meses no cuenta.
+    medio_anio = serie.drop(serie.index[(serie.index.year == 1991) & (serie.index.month > 6)])
+    assert 1991 not in caso.promedios_anuales(medio_anio).index
+
+
+def test_cubo_de_satelite_recorte_y_punto():
+    from expediente import datos_gee
+    indice = pd.date_range("2000-01-01", periods=24, freq="MS")
+    lats, lons = [29.75, 25.75, 22.25], [-103.75, -100.25, -96.25]
+    cubo = pd.DataFrame({f"{la},{lo}": np.full(24, la + lo) for la in lats for lo in lons}, index=indice)
+    assert datos_gee.recortar(cubo, 25.68, -100.32, 8).shape[1] == 9
+    assert list(datos_gee.recortar(cubo, 25.68, -100.32, 4).columns) == ["25.75,-100.25"]
+    assert datos_gee.serie_del_punto(cubo, 25.68, -100.32).iloc[0] == pytest.approx(25.75 - 100.25)
+    assert datos_gee.serie_del_punto(cubo.iloc[:, :0], 25.68, -100.32).empty
+    assert datos_gee.serie_del_punto(cubo, 27.5, -100.32).empty  # la celda más cercana queda lejos
+
+
+def test_catalogo_distingue_modelo_y_satelite():
+    from expediente.datos_gee import FUENTES
+    assert {v.codigo for v in CATALOGO if v.origen == "gee"} == set(FUENTES)

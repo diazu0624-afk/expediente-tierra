@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-MERRA2 = "MERRA-2 (reanálisis de la NASA)"
+MERRA2 = "MERRA-2 (reanálisis de la NASA), vía NASA POWER"
+GPM = "GPM IMERG (satélites de la NASA y JAXA), vía Google Earth Engine"
+MODIS = "MODIS a bordo del satélite Terra (NASA), vía Google Earth Engine"
+GRACE = "GRACE y GRACE-FO (satélites de la NASA y Alemania), vía Google Earth Engine"
 
 
 @dataclass(frozen=True)
@@ -23,11 +26,14 @@ class Variable:
     # True si tiene sentido hablar de "cambió un X %" (no aplica a °C: 20 °C no es "el doble" de 10 °C).
     relativo: bool = False
     aviso: str = ""
+    # "power": modelo MERRA-2 por la API de NASA POWER. "gee": instrumento de satélite por Earth Engine.
+    origen: str = "power"
 
 
 TEMPERATURA = "Temperatura"
 AGUA = "Agua y humedad"
 AIRE = "Aire y viento"
+VEGETACION = "Vegetación"
 
 # No se incluyen nubosidad, radiación solar ni albedo: POWER los toma de CERES SYN1deg, que
 # tiene saltos artificiales cuando cambian los satélites (2001, 2017-2018, 2022). Un
@@ -98,6 +104,23 @@ CATALOGO: tuple[Variable, ...] = (
              "Qué tanto bloquean la luz el polvo, el humo y la contaminación. Se mide con "
              "un índice llamado AOD: cerca de 0 el aire es muy limpio; arriba de 0.4 ya se "
              "ve turbio.", desde=2001, relativo=True),
+    # --- Instrumentos de satélite (observaciones directas, no un modelo) ---
+    Variable("GPM_LLUVIA", "Lluvia medida desde satélite (GPM)", "mm/día", AGUA,
+             "Lluvia y nieve observadas por una constelación de satélites con radares y "
+             "sensores de microondas, afinadas con pluviómetros en tierra.",
+             fuente=GPM, desde=1998, relativo=True, origen="gee"),
+    Variable("GRACE_AGUA", "Agua almacenada en la tierra (GRACE)", "cm de agua", AGUA,
+             "Toda el agua guardada en el lugar: acuíferos, suelo, ríos y nieve. Dos satélites "
+             "gemelos la «pesan» midiendo cómo cambia la gravedad. Se expresa en centímetros "
+             "de agua de más o de menos respecto al promedio de 2004 a 2009.",
+             fuente=GRACE, desde=2002, origen="gee",
+             aviso="GRACE ve manchas de unos 300 km: no distingue una ciudad de sus alrededores. "
+                   "Faltan los datos de mediados de 2017 a mediados de 2018, entre una misión "
+                   "y la siguiente."),
+    Variable("MODIS_NDVI", "Verdor de la vegetación (MODIS)", "NDVI", VEGETACION,
+             "Qué tan verde y frondosa se ve la superficie desde el satélite. Se mide con un "
+             "índice llamado NDVI: cerca de 0 es suelo desnudo; cerca de 1, selva densa.",
+             fuente=MODIS, desde=2000, relativo=True, origen="gee"),
 )
 
 POR_CODIGO: dict[str, Variable] = {v.codigo: v for v in CATALOGO}

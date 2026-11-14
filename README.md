@@ -1,8 +1,8 @@
 # Expediente Tierra
 
 Herramienta para el reto "Be an Earth System Trend Detective!" (NASA Space Apps 2026).
-Eliges un lugar del planeta y la app responde qué está cambiando ahí, cuánto, y si la
-tendencia es significativa.
+Eliges un lugar del planeta y la app responde qué está cambiando ahí, dónde, cuánto, y
+si la tendencia es significativa.
 
 ## Correr la app
 
@@ -25,8 +25,22 @@ python -m venv .venv
 .venv\Scripts\streamlit run app.py
 ```
 
-Se abre en http://localhost:8501. No necesita cuentas ni llaves: los datos salen de la
-API pública de NASA POWER.
+Se abre en http://localhost:8501. Los seis casos de demostración funcionan sin cuentas ni
+llaves, porque sus datos ya vienen guardados en `cache_power/`.
+
+### Datos de satélite en lugares nuevos (opcional)
+
+Las variables del modelo MERRA-2 salen de la API pública de NASA POWER y funcionan en
+cualquier lugar. Las de satélite (lluvia de GPM, vegetación de MODIS, agua de GRACE) salen
+de Google Earth Engine; para verlas en un lugar que no sea un caso de demostración hace
+falta una cuenta con acceso a un proyecto de Earth Engine:
+
+```bash
+SSL_CERT_FILE=$(.venv/bin/python -m certifi) .venv/bin/earthengine authenticate
+export EXPEDIENTE_EE_PROYECTO=el-id-de-tu-proyecto   # si no es el del equipo
+```
+
+Sin esa sesión la app sigue funcionando; solo avisa que los satélites no están disponibles.
 
 ## Cómo está organizada
 
@@ -34,7 +48,9 @@ API pública de NASA POWER.
 |---|---|
 | `app.py` | La interfaz (Streamlit): lugar, rueda de sospechosos, interrogatorio, veredicto. |
 | `expediente/variables.py` | Catálogo de variables con su definición en lenguaje sencillo. |
-| `expediente/datos.py` | Descarga las series mensuales de NASA POWER y busca lugares por nombre. |
+| `expediente/datos.py` | Descarga las series mensuales de NASA POWER (punto y región) y busca lugares por nombre. |
+| `expediente/datos_gee.py` | Descarga GPM, MODIS y GRACE desde Google Earth Engine. |
+| `expediente/region.py` | Mapa de tendencias celda por celda y promedio regional. |
 | `expediente/estadistica.py` | Las pruebas: Mann-Kendall, prueba t, intervalos, corrección de memoria. |
 | `expediente/caso.py` | Arma la rueda de sospechosos y aplica las cinco pruebas a una variable. |
 | `expediente/veredicto.py` | Redacta el veredicto y el expediente descargable. |

@@ -124,7 +124,7 @@ def descargar_region(lat: float, lon: float, codigo: str, lado: float = 8,
     tabla = pd.DataFrame(columnas).sort_index()
     tabla = tabla.loc[:tabla.dropna(how="all").index.max()]
     DIR_CACHE.mkdir(exist_ok=True)
-    tabla.to_csv(ruta)
+    tabla.to_csv(ruta, float_format="%.5g")
     return tabla
 
 

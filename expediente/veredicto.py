@@ -13,8 +13,9 @@ from .caso import NIVELES, N_PRUEBAS, Interrogatorio, numero, valor_p
 
 ADVERTENCIAS_GENERALES = (
     "Los datos describen un cuadro de unos 50 km de lado alrededor del punto, no el punto exacto.",
-    "La mayoría de las variables viene de MERRA-2, que combina un modelo con observaciones. "
-    "Los cambios de instrumentos a lo largo de las décadas pueden dejar huella en algunas series.",
+    "Las variables de MERRA-2 combinan un modelo con observaciones, y los cambios de instrumentos a "
+    "lo largo de las décadas pueden dejar huella en algunas series. Las de GPM, MODIS y GRACE son "
+    "observaciones de satélite, con registros más cortos.",
     "Una tendencia significativa dice que algo está cambiando, no por qué cambia.",
 )
 
@@ -95,7 +96,7 @@ def expediente_markdown(r: Interrogatorio, lugar: str, lat: float, lon: float) -
         "",
         "## Qué se investigó",
         f"{r.variable.nombre} ({r.variable.unidad}). {r.variable.definicion}",
-        f"Fuente: NASA POWER, {r.variable.fuente}.",
+        f"Fuente: {r.variable.fuente}.",
         "",
         "## Dónde y cuándo",
         f"{lugar} (latitud {lat:.2f}, longitud {lon:.2f}), de {inicio:%m/%Y} a {fin:%m/%Y}.",
