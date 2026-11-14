@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from expediente import caso, datos, datos_gee, graficas, region, veredicto
+from expediente import caso, datos, datos_gee, graficas, informe, region, veredicto
 from expediente.variables import CATALOGO, CATEGORIAS, METODOS, POR_CODIGO, REFERENCIAS, Variable
 
 RAIZ = Path(__file__).parent
@@ -652,12 +652,14 @@ def _contraste_de_hipotesis(r: caso.Interrogatorio, hipotesis: str) -> str:
     firme = r.nivel in ("solida", "fuerte")
     real = HIPOTESIS[2] if not firme else HIPOTESIS[0] if r.sube else HIPOTESIS[1]
     if hipotesis == real:
-        return f"**Hipótesis inicial: «{hipotesis.lower()}».** El análisis la respalda."
+        return f"«{hipotesis}». El análisis la respalda."
     dice = "no hay evidencia suficiente de un cambio" if not firme else real.lower()
-    return f"**Hipótesis inicial: «{hipotesis.lower()}».** El análisis no la respalda: {dice}."
+    return f"«{hipotesis}». El análisis no la respalda: {dice}."
 
 
-def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = None) -> None:
+def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = None,
+                   mapa: pd.DataFrame | None = None, region_txt: str = "",
+                   contraste: tuple[str, str | None] | None = None) -> None:
     seccion(5, "Resultado")
     v = veredicto.redactar(r)
     u = r.variable.unidad
@@ -680,7 +682,7 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
         if v.registro_corto:
             st.warning(f"**Registro corto.** {v.registro_corto}", icon=":material/warning:")
         if hipotesis:
-            st.markdown(_contraste_de_hipotesis(r, hipotesis))
+            st.markdown(f"**Hipótesis inicial.** {_contraste_de_hipotesis(r, hipotesis)}")
         ficha, salvedades = st.columns(2)
         ficha.markdown("**Ficha técnica**\n\n| Característica | Detalle |\n|---|---|\n" + "\n".join(
             f"| {nombre} | {detalle} |" for nombre, detalle in veredicto.ficha_tecnica(r)))
@@ -688,10 +690,15 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
         salvedades.markdown("**Limitaciones**\n\n" + "\n".join(f"- {x}" for x in v.advertencias))
     st.download_button(
         "Descargar el informe",
-        veredicto.informe_markdown(r, sitio["nombre"], sitio["lat"], sitio["lon"]),
-        file_name=f"informe_{r.variable.codigo}_{sitio['lat']:.2f}_{sitio['lon']:.2f}.md",
-        mime="text/markdown",
+        informe.informe_html(
+            r, sitio["nombre"], sitio["lat"], sitio["lon"], mapa=mapa, region=region_txt, contraste=contraste,
+            hipotesis=_contraste_de_hipotesis(r, hipotesis) if hipotesis else "",
+            fecha_datos=datos.fecha_de_datos(sitio["lat"], sitio["lon"], [x.codigo for x in CATALOGO if x.origen == "power"]),
+        ),
+        file_name=f"informe_{r.variable.codigo}_{sitio['lat']:.2f}_{sitio['lon']:.2f}.html",
+        mime="text/html",
         icon=":material/download:",
+        help="Archivo HTML: se abre en cualquier navegador y se puede imprimir o guardar como PDF.",
     )
 
 
@@ -779,7 +786,7 @@ def pagina_analisis() -> None:
     planteada = next((c for c in preferidas if c in validas), validas[0]) if guiado else None
     hipotesis = guiado["hipotesis"] if guiado and codigo == planteada else None
 
-    ejemplo = sitio["nombre"]
+    ejemplo, punto = sitio["nombre"], sitio  # `sitio` cambia si se analiza la región o una celda
     espacial = paso_mapa(sitio, codigo, periodo)
     lado, alcance, celda = espacial if espacial else (None, "El punto", None)
     try:
@@ -797,7 +804,13 @@ def pagina_analisis() -> None:
         st.warning(str(error))
         return
     paso_serie(r)
-    paso_resultado(r, sitio, hipotesis)
+    mapa, region_txt = None, ""
+    if lado is not None:
+        mapa = cargar_mapa(punto["lat"], punto["lon"], codigo, lado, periodo)
+        lat_min, lat_max, lon_min, lon_max = datos.caja(punto["lat"], punto["lon"], lado)
+        region_txt = (f"Recuadro de {lado}° × {lado}° alrededor de {punto['nombre']}: latitud {lat_min:g}° a "
+                      f"{lat_max:g}°, longitud {lon_min:g}° a {lon_max:g}°.")
+    paso_resultado(r, sitio, hipotesis, mapa, region_txt, CONTRASTES.get((ejemplo, codigo)))
     contraste_con_literatura(ejemplo, codigo)
     metodo()
 

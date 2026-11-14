@@ -196,3 +196,25 @@ def test_aviso_de_registro_corto():
     assert "usa 18 años" in veredicto.aviso_registro_corto(corto)
     assert veredicto.redactar(corto).registro_corto and "## Registro corto" in veredicto.informe_markdown(corto, "X", 0.0, 0.0)
     assert veredicto.aviso_registro_corto(largo) == "" and veredicto.redactar(largo).registro_corto == ""
+
+
+def test_informe_html_completo_y_con_texto_externo_escapado():
+    from expediente import informe
+    r = caso.interrogar(_serie(0.06, semilla=4), POR_CODIGO["T2M"])
+    mapa = pd.DataFrame({"lat": [25.0, 25.0, 25.5, 25.5], "lon": [-100.0, -99.375, -100.0, -99.375],
+                         "pendiente_decada": [0.4, 0.2, -0.3, 0.1], "p": [0.01, 0.2, 0.01, 0.6],
+                         "p_ajustada": [0.02, 0.3, 0.02, 0.6], "significativa": [True, False, True, False]})
+    html = informe.informe_html(r, "Sitio <script>alert(1)</script>", 25.2, -99.8, mapa=mapa,
+                                region="Recuadro de prueba.", contraste=("Texto de contraste.", "rodell2009"),
+                                hipotesis="«Está aumentando». El análisis la respalda.")
+    assert html.startswith("<!doctype html>") and html.count("<svg") == 2
+    assert "<script>alert(1)</script>" not in html and "&lt;script&gt;" in html
+    for parte in ("Informe de análisis de tendencia", "Equipo C15H25N3O", "Resumen", "Variable analizada",
+                  "Serie de tiempo", "Pruebas de significancia", "Distribución espacial", "Ficha técnica",
+                  "Supuestos del análisis", "Limitaciones", "Contraste con la literatura", "Método",
+                  "Referencias", "10.1038/nature08238", "10.1175/JCLI-D-16-0758.1", "Hipótesis inicial"):
+        assert parte in html, parte
+    sin_extras = informe.informe_html(r, "X", 0.0, 0.0)
+    assert "Distribución espacial" not in sin_extras and "Contraste con la literatura" not in sin_extras
+    anual = caso.interrogar((_serie(-0.08, ruido=0.6, ciclo=0.0, semilla=5) - 14).clip(lower=0).round(2).where(lambda s: s.index.month.isin([12, 1, 2, 3]), 0.0), POR_CODIGO["FROST_DAYS"])
+    assert "Promedio anual" in informe.informe_html(anual, "X", 0.0, 0.0)
