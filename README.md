@@ -43,13 +43,13 @@ python -m venv .venv
 .venv\Scripts\streamlit run app.py
 ```
 
-Se abre en http://localhost:8501. Los seis sitios de ejemplo funcionan sin cuentas ni
+Se abre en http://localhost:8501. Los siete sitios de ejemplo funcionan sin cuentas ni
 llaves, porque sus datos ya vienen guardados en `cache_power/`.
 
 ### Datos de satélite en lugares nuevos (opcional)
 
 Las variables de reanálisis salen de la API pública de NASA POWER y funcionan en cualquier
-lugar. Las de satélite (GPM, MODIS, GRACE) salen de Google Earth Engine; para verlas en un
+lugar. Las de satélites y modelos (GPM, MODIS, GRACE, OMI, FLDAS, OISST) salen de Google Earth Engine; para verlas en un
 lugar que no sea un sitio de ejemplo hace falta una cuenta con acceso a un proyecto de
 Earth Engine:
 
@@ -137,7 +137,7 @@ Servicios externos:
 | Servicio | Para qué | Autenticación |
 |---|---|---|
 | NASA POWER (`power.larc.nasa.gov`) | Series mensuales de reanálisis, por punto y por región | Ninguna |
-| Google Earth Engine | Cubos mensuales de GPM, MODIS y GRACE | Cuenta y proyecto del usuario |
+| Google Earth Engine | Cubos mensuales de GPM, MODIS, GRACE, OMI, FLDAS y OISST | Cuenta y proyecto del usuario |
 | Open-Meteo Geocoding | Convertir el nombre de un lugar en coordenadas | Ninguna |
 | Google Fonts y teselas de CARTO | Tipografías y mapa base | Ninguna |
 
@@ -159,9 +159,10 @@ expediente-tierra/
 │   └── demo.html               Recorrido animado (lo genera expediente/demo.py)
 ├── expediente/                 Lógica de la aplicación (sin Streamlit)
 │   ├── __init__.py
-│   ├── variables.py            Catálogo de 27 variables y 27 referencias con DOI
+│   ├── variables.py            Catálogo de 37 variables y 34 referencias con DOI
 │   ├── datos.py                NASA POWER (punto y región), geocodificador y caché
-│   ├── datos_gee.py            Google Earth Engine: GPM, MODIS y GRACE
+│   ├── datos_gee.py            Google Earth Engine: 11 variables de satélites y modelos
+│   ├── sitio.py                Todas las variables de un punto; regla tierra/mar
 │   ├── estadistica.py          Motor estadístico: pruebas, estimadores, bootstrap
 │   ├── caso.py                 Exploración de variables y análisis de una serie
 │   ├── region.py               Mapa de tendencias por celda y promedio regional
@@ -171,11 +172,12 @@ expediente-tierra/
 │   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
-│   └── test_caso.py            19 pruebas del análisis, la región y el informe
-├── validacion/                 Simulaciones de Monte Carlo
+│   └── test_caso.py            23 pruebas del análisis, la región, el informe y la regla tierra/mar
+├── validacion/                 Simulaciones de Monte Carlo y filtro de calidad de datos
 │   ├── calibracion.py          Falsos positivos y potencia de cada prueba
 │   ├── veredictos.py           Falsos positivos y potencia del resultado completo
-│   └── series_cortas.py        Calibración con series anuales de 19 a 45 años
+│   ├── series_cortas.py        Calibración con series anuales de 19 a 45 años
+│   └── calidad_de_datos.py     Cobertura, saltos de instrumento y acuerdo entre fuentes
 └── cache_power/                Datos ya descargados; crece con cada lugar consultado
     ├── descargas.json          Fecha de descarga de cada archivo
     ├── power_*.csv             Punto: todas las variables de POWER
@@ -364,7 +366,13 @@ flowchart LR
 - **Región de reanálisis** (`datos.descargar_region`): una variable por petición, recuadro
   de 2° a 10°.
 - **Región de satélite** (`datos_gee.descargar_cubo`): apila todos los meses de la colección
-  en una imagen y pide de una vez una rejilla de 20 × 20 celdas de 0.5°.
+  en una imagen y pide de una vez una rejilla de 10° (celdas de 0.5° o de 1°, según el
+  producto). Los productos diarios (ozono, clorofila, temperatura del mar) se promedian por
+  mes en los servidores de Earth Engine, en tandas de 24 meses pedidas en paralelo.
+- **Todas las variables de un punto** (`sitio.tabla_del_punto`): une POWER con las series de
+  Earth Engine, pedidas en paralelo, y aplica la regla tierra/mar: las variables del océano
+  solo aparecen donde OISST tiene datos, y las de tierra firme (suelo, nieve, vegetación,
+  GRACE, escurrimiento) se omiten en mar abierto.
 
 ### 6.6 Inicio guiado y comparación
 
@@ -442,6 +450,13 @@ Las funciones cuyo nombre empieza con guion bajo son internas del módulo.
 | `recortar(cubo, lat, lon, lado)` | Celdas del cubo dentro de un recuadro más pequeño |
 | `serie_del_punto(cubo, lat, lon)` | Serie de la celda más cercana al punto |
 
+### `expediente/sitio.py`
+
+| Función | Qué hace |
+|---|---|
+| `tabla_del_punto(lat, lon)` | Series mensuales de todas las variables disponibles en un punto |
+| `fuera_de_lugar(tabla)` | Variables que el punto no puede tener (mar en tierra firme, tierra en mar abierto) |
+
 ### `expediente/veredicto.py`
 
 | Función | Qué hace |
@@ -500,7 +515,8 @@ Las pruebas provienen de la literatura citada. Los valores de esta tabla marcado
 | `ANIOS_CLIMA` | 30 | `veredicto` | Por debajo se advierte "registro corto" | Periodo de referencia de la OMM |
 | `DIAS_VIGENCIA` | 30 | `datos` | Días tras los que se vuelve a descargar | Criterio del equipo |
 | `MAX_PARAMETROS` | 20 | `datos` | Parámetros por petición | Límite de la API de POWER |
-| `LADO_CUBO`, `CELDA` | 10°, 0.5° | `datos_gee` | Tamaño y resolución de los cubos de satélite | Criterio del equipo |
+| `LADO_CUBO` | 10° | `datos_gee` | Tamaño de los cubos de satélite | Criterio del equipo |
+| `MESES_POR_PETICION`, `HILOS` | 24, 6 | `datos_gee` | Tandas y peticiones simultáneas para los productos diarios | Límites de Earth Engine |
 
 ---
 
@@ -510,7 +526,7 @@ Las pruebas provienen de la literatura citada. Los valores de esta tabla marcado
 |---|---|---|
 | Punto | NASA POWER, API mensual por punto | Filas: meses. Columnas: códigos de variable |
 | Región de reanálisis | NASA POWER, API mensual regional | Filas: meses. Columnas: celdas, nombradas `"lat,lon"` |
-| Región de satélite | Google Earth Engine | Igual que la anterior, en rejilla de 0.5° |
+| Región de satélite | Google Earth Engine | Igual que la anterior, en rejilla de 0.5° o 1° |
 
 Archivos de `cache_power/`:
 
@@ -526,6 +542,41 @@ Colecciones de Earth Engine (`datos_gee.FUENTES`):
 | Código | Colección | Banda | Conversión |
 |---|---|---|---|
 | `GPM_LLUVIA` | `NASA/GPM_L3/IMERG_MONTHLY_V07` | `precipitation` | mm/h a mm/día |
+| `MODIS_NDVI`, `MODIS_EVI` | `MODIS/061/MOD13A3` | `NDVI`, `EVI` | × 0.0001 |
+| `GRACE_AGUA` | `NASA/GRACE/MASS_GRIDS_V04/MASCON_CRI` | `lwe_thickness` | Ninguna (cm) |
+| `MODIS_AOD` | `MODIS/061/MOD08_M3` | `Aerosol_Optical_Depth_Land_Ocean_Mean_Mean` | × 0.001 |
+| `MODIS_NUBES` | `MODIS/061/MOD08_M3` | `Cloud_Fraction_Mean_Mean` | × 0.01 (a %) |
+| `FLDAS_ESCURRIMIENTO` | `NASA/FLDAS/NOAH01/C/GL/M/V001` | `Qs_tavg` + `Qsb_tavg` | kg/m²/s a mm/día |
+| `OMI_OZONO` | `TOMS/MERGED` (diaria) | `ozone` | Ninguna (unidades Dobson) |
+| `MAR_SST` | `NOAA/CDR/OISST/V2_1` (diaria) | `sst` | × 0.01 (°C) |
+| `MAR_SST_MODIS`, `MAR_CLOROFILA` | `NASA/OCEANDATA/MODIS-Aqua/L3SMI` (diaria) | `sst`, `chlor_a` | Ninguna |
+
+### Filtro de calidad de las variables
+
+Antes de entrar al catálogo, cada variable se evalúa en siete sitios
+(`python -m validacion.calidad_de_datos`) con tres criterios:
+
+1. **Cobertura**: fracción de meses con dato dentro de su periodo.
+2. **Saltos de instrumento**: si el mayor quiebre de la serie cae en el mismo año en sitios
+   distantes entre sí, se debe al instrumento o al procesamiento, no al clima.
+3. **Acuerdo entre fuentes**: correlación de anomalías y coincidencia del signo de la
+   tendencia con otra fuente independiente de la misma magnitud.
+
+| Variable evaluada | Resultado | Decisión |
+|---|---|---|
+| Aerosoles MODIS frente a CERES | r = 0.65, mismo signo en 5 de 5 sitios | Incluida |
+| Ozono OMI frente a MERRA-2 | r = 0.96, mismo signo en 6 de 6 | Incluida |
+| EVI frente a NDVI | r = 0.95, mismo signo en 6 de 6 | Incluida |
+| Precipitación GPM frente a MERRA-2 | r = 0.75, mismo signo en 7 de 7 | Incluida |
+| Escurrimiento FLDAS frente a precipitación | r = 0.69, mismo signo en 6 de 6 | Incluida |
+| Temperatura del mar MODIS frente a OISST | r = 0.90 a 0.98; tendencias a menos de 0.05 °C/década en 4 puntos de océano | Incluida |
+| Temperatura del suelo MODIS Terra (MOD21C3) | Escalón en 2020 en 5 de 6 sitios; r = 0.47 con MERRA-2 | Excluida |
+| Vapor de agua MODIS Terra (MOD08_M3) | Signo contrario a MERRA-2 en 4 de 7 sitios; quiebre común en 2008 | Excluida |
+| Nubosidad, radiación y albedo de CERES SYN1deg | Saltos al cambiar los satélites de entrada | Excluidas |
+| Temperatura del tope de nubes; tope de la capa límite | Escala o interpretación dudosas | Excluidas |
+
+---|---|---|---|
+| `GPM_LLUVIA` | `NASA/GPM_L3/IMERG_MONTHLY_V07` | `precipitation` | mm/h a mm/día |
 | `MODIS_NDVI` | `MODIS/061/MOD13A3` | `NDVI` | × 0.0001 |
 | `GRACE_AGUA` | `NASA/GRACE/MASS_GRIDS_V04/MASCON_CRI` | `lwe_thickness` | Ninguna (cm) |
 
@@ -535,10 +586,11 @@ Colecciones de Earth Engine (`datos_gee.FUENTES`):
 
 ```bash
 .venv/bin/pip install pytest pymannkendall
-.venv/bin/python -m pytest                   # 44 pruebas
+.venv/bin/python -m pytest                   # 48 pruebas
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del resultado completo
 .venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas
+.venv/bin/python -m validacion.calidad_de_datos # filtro de calidad de las variables (requiere Earth Engine)
 ```
 
 Qué cubren las pruebas automáticas:

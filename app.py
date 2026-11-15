@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as componentes
 
-from expediente import caso, datos, datos_gee, graficas, informe, region, veredicto
+from expediente import caso, datos, datos_gee, graficas, informe, region, sitio as sitios, veredicto
 from expediente.variables import CATALOGO, CATEGORIAS, METODOS, POR_CODIGO, REFERENCIAS, Variable
 
 RAIZ = Path(__file__).parent
@@ -39,6 +39,9 @@ EJEMPLOS = [
     {"nombre": "Manaos, Brasil (Amazonía)", "lat": -3.10, "lon": -60.02,
      "pregunta": "En el centro de la selva más grande del planeta. ¿Está cambiando la "
                  "precipitación? Compara el reanálisis con la observación del satélite GPM."},
+    {"nombre": "Golfo de México (océano)", "lat": 25.0, "lon": -90.0,
+     "pregunta": "El Golfo de México alimenta a los huracanes que llegan a México y Estados "
+                 "Unidos. ¿Se está calentando el mar? ¿Cambia la clorofila, base de su vida marina?"},
 ]
 
 # Comparaciones sugeridas: (título, índice del ejemplo A, índice del B, variable, pregunta).
@@ -92,6 +95,7 @@ TEMAS = {
     "Precipitación y agua": ["GRACE_AGUA", "GPM_LLUVIA", "PRECTOTCORR"],
     "Calidad del aire": ["AOD_55"],
     "Vegetación y cultivos": ["MODIS_NDVI", "GWETROOT"],
+    "Océano": ["MAR_SST", "MAR_CLOROFILA", "TS"],
     "Heladas y nieve": ["FROST_DAYS", "SNODP", "T2M_MIN"],
     "La variable con mayor tendencia": [],
 }
@@ -171,17 +175,8 @@ def _parametro(nombre: str) -> str:
 
 @st.cache_data(show_spinner=False)
 def cargar_datos(lat: float, lon: float) -> pd.DataFrame:
-    """Todas las variables en el punto: reanálisis por POWER más los satélites que respondan."""
-    tabla = datos.descargar_power(lat, lon, [v.codigo for v in CATALOGO if v.origen == "power"])
-    for v in CATALOGO:
-        if v.origen == "gee":
-            try:
-                serie = datos_gee.serie_del_punto(datos_gee.descargar_cubo(lat, lon, v.codigo), lat, lon)
-            except datos.ErrorDeDatos:
-                continue  # sin sesión de Earth Engine: el análisis sigue con las demás variables
-            if not serie.empty:
-                tabla = tabla.join(serie.rename(v.codigo), how="outer")
-    return tabla
+    """Todas las variables en el punto: reanálisis por POWER más lo que responda Earth Engine."""
+    return sitios.tabla_del_punto(lat, lon)
 
 
 Periodo = tuple[int, int]  # (año inicial, año final), ambos incluidos
@@ -273,7 +268,7 @@ def plotly(figura, clave: str | None = None) -> None:
 # ------------------------------------------------------------------ fichas de variables
 
 def _tipo(v: Variable) -> str:
-    return "Observación satelital" if v.origen == "gee" else "Reanálisis o modelo"
+    return v.clase
 
 
 def ficha_variable(v: Variable) -> None:
@@ -391,9 +386,9 @@ def pagina_inicio() -> None:
     seccion(5, "Datos")
     satelite = sum(v.origen == "gee" for v in CATALOGO)
     a, b, c = st.columns(3)
-    cifra(a, "Variables", f"{len(CATALOGO)}", "series mensuales, de 1981 a la fecha")
+    cifra(a, "Variables", f"{len(CATALOGO)}", "tierra, atmósfera y océano; series mensuales")
     cifra(b, "De reanálisis", f"{len(CATALOGO) - satelite}", "MERRA-2 y CERES, vía NASA POWER")
-    cifra(c, "De satélite", f"{satelite}", "GPM, MODIS y GRACE, vía Google Earth Engine")
+    cifra(c, "De satélites y modelos", f"{satelite}", "GPM, MODIS, GRACE, OMI, FLDAS y OISST, vía Earth Engine")
     st.page_link(PAGINAS["variables"], label="Definiciones y referencias de las variables",
                  icon=":material/arrow_forward:")
 
@@ -410,9 +405,9 @@ def pagina_variables() -> None:
     encabezado(
         "Catálogo",
         "Variables",
-        f"{len(CATALOGO)} variables mensuales: {len(CATALOGO) - satelite} de reanálisis y "
-        f"modelos de la NASA y {satelite} de observación satelital. Cada una con su definición, "
-        f"el producto de datos del que proviene y sus referencias.",
+        f"{len(CATALOGO)} variables mensuales de tierra, atmósfera y océano: {len(CATALOGO) - satelite} de "
+        f"reanálisis vía NASA POWER y {satelite} de satélites y modelos vía Google Earth Engine. Cada una "
+        f"con su definición, el producto de datos del que proviene y sus referencias.",
     )
 
     consultada = POR_CODIGO.get(_parametro("var"))
@@ -448,8 +443,13 @@ def pagina_variables() -> None:
     st.markdown("**Métodos estadísticos**")
     for clave in sorted(METODOS, key=lambda c: REFERENCIAS[c].cita):
         st.markdown(f"- {REFERENCIAS[clave].cita} [{REFERENCIAS[clave].url}]({REFERENCIAS[clave].url})")
-    st.caption("No se incluyen nubosidad, radiación solar ni albedo: el producto CERES SYN1deg "
-               "presenta discontinuidades en esos campos cuando cambian los satélites que lo alimentan.")
+    st.markdown("**Filtro de calidad.** Cada variable se evaluó en siete sitios antes de incluirla: "
+                "cobertura del registro, saltos que coinciden en el mismo año en lugares distantes (señal de "
+                "un cambio de instrumento y no del clima) y acuerdo con otra fuente independiente. No pasaron "
+                "y quedaron fuera: nubosidad, radiación solar y albedo de CERES SYN1deg (saltos al cambiar de "
+                "satélite); temperatura del suelo de MODIS Terra (escalón en 2020 en 5 de 6 sitios, compatible "
+                "con la deriva de su órbita); y vapor de agua de MODIS Terra (contradice en signo al reanálisis "
+                "en 4 de 7 sitios).")
 
 
 # ------------------------------------------------------------------ página: análisis de un lugar
@@ -474,17 +474,17 @@ def elegir_sitio() -> dict | None:
 
 def paso_sitio(sitio: dict, tabla_datos: pd.DataFrame) -> None:
     seccion(1, "Sitio de estudio")
-    satelites = [v.codigo.split("_")[0] for v in CATALOGO if v.origen == "gee" and v.codigo in tabla_datos]
+    satelites = [v for v in CATALOGO if v.origen == "gee" and v.codigo in tabla_datos]
     texto, mapa = st.columns([3, 2])
     texto.markdown(
         f"Latitud {sitio['lat']:.2f}, longitud {sitio['lon']:.2f}  \n"
         f"Datos mensuales de {tabla_datos.index.min():%Y} a {tabla_datos.index.max():%Y}: "
-        f"{sum(v.origen == 'power' for v in CATALOGO)} variables de reanálisis de la NASA"
-        + (f" y {len(satelites)} de satélite ({', '.join(satelites)})." if satelites else ".")
+        f"{sum(v.origen == 'power' and v.codigo in tabla_datos for v in CATALOGO)} variables de reanálisis vía NASA POWER"
+        + (f" y {len(satelites)} de satélites y modelos vía Google Earth Engine." if satelites else ".")
     )
     if not satelites:
-        texto.caption("Las variables de satélite (GPM, MODIS, GRACE) no están disponibles: hace "
-                      "falta una sesión de Google Earth Engine en esta computadora.")
+        texto.caption("Las variables que llegan por Google Earth Engine (GPM, MODIS, GRACE, OMI, océano) "
+                      "no están disponibles: hace falta una sesión de Earth Engine en esta computadora.")
     fecha = datos.fecha_de_datos(sitio["lat"], sitio["lon"], [v.codigo for v in CATALOGO if v.origen == "power"])
     texto.caption("Cada dato representa un área alrededor del punto, no un sitio puntual: unos 50 km "
                   "de lado en la mayoría de las variables, 100 km en aerosoles y 300 km en GRACE."
@@ -718,8 +718,10 @@ def metodo() -> None:
             """
 **Datos.** Series mensuales de dos tipos. De reanálisis: [NASA POWER](https://power.larc.nasa.gov/)
 distribuye variables de MERRA-2 para cualquier punto del planeta desde 1981. De satélite, por
-Google Earth Engine: precipitación de GPM IMERG (desde 1998), índice de vegetación de MODIS
-(desde 2000) y almacenamiento de agua terrestre de GRACE (desde 2002). Para la región se usa
+Google Earth Engine: precipitación de GPM IMERG (desde 1998), vegetación, aerosoles y nubosidad
+de MODIS (desde 2000), almacenamiento de agua de GRACE (desde 2002), ozono de OMI (desde 2005),
+clorofila y temperatura del mar de MODIS Aqua (desde 2003), temperatura del mar de OISST (desde
+1982) y escurrimiento del modelo FLDAS (desde 1982). Para la región se usa
 cada celda de unos 50 km dentro del recuadro y se promedia ponderando por área.
 
 **Tasa de cambio.** Pendiente de una regresión lineal por mínimos cuadrados sobre las

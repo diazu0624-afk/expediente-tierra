@@ -97,6 +97,33 @@ REFERENCIAS: dict[str, Referencia] = {
         "Wiese, D. N., et al. (2023). JPL GRACE and GRACE-FO Mascon Ocean, Ice, and Hydrology "
         "Equivalent Water Height CRI Filtered, Release 06.3 Version 04. NASA PO.DAAC.",
         _doi("10.5067/TEMSC-3JC634")),
+    "platnick2015": Referencia(
+        "Platnick, S., King, M., & Hubanks, P. (2015). MODIS Atmosphere L3 Monthly Product. NASA "
+        "MODIS Adaptive Processing System, Goddard Space Flight Center.",
+        _doi("10.5067/MODIS/MOD08_M3.061")),
+    "mcnally2017": Referencia(
+        "McNally, A., Arsenault, K., Kumar, S., et al. (2017). A land data assimilation system "
+        "for sub-Saharan Africa food and water security applications. Scientific Data, 4, 170012.",
+        _doi("10.1038/sdata.2017.12")),
+    "mcnally2018": Referencia(
+        "McNally, A., NASA/GSFC/HSL (2018). FLDAS Noah Land Surface Model L4 Global Monthly "
+        "0.1 x 0.1 degree (MERRA-2 and CHIRPS). GES DISC.", _doi("10.5067/5NHC22T9375G")),
+    "levelt2006": Referencia(
+        "Levelt, P. F., van den Oord, G. H. J., Dobber, M. R., et al. (2006). The Ozone "
+        "Monitoring Instrument. IEEE Transactions on Geoscience and Remote Sensing, 44(5), "
+        "1093–1101.", _doi("10.1109/TGRS.2006.872333")),
+    "obpg2022": Referencia(
+        "NASA Goddard Space Flight Center, Ocean Ecology Laboratory, Ocean Biology Processing "
+        "Group (2022). Moderate-resolution Imaging Spectroradiometer (MODIS) Aqua Ocean Color "
+        "Data. NASA OB.DAAC.", _doi("10.5067/AQUA/MODIS/L3M/CHL/2022")),
+    "huang2021": Referencia(
+        "Huang, B., Liu, C., Banzon, V., et al. (2021). Improvements of the Daily Optimum "
+        "Interpolation Sea Surface Temperature (DOISST) Version 2.1. Journal of Climate, 34(8), "
+        "2923–2939.", _doi("10.1175/JCLI-D-20-0166.1")),
+    "reynolds2008": Referencia(
+        "Reynolds, R. W., Banzon, V. F., & NOAA CDR Program (2008). NOAA Optimum Interpolation "
+        "1/4 Degree Daily Sea Surface Temperature (OISST) Analysis, Version 2. NOAA National "
+        "Centers for Environmental Information.", _doi("10.7289/V5SQ8XB5")),
     "gorelick2017": Referencia(
         "Gorelick, N., Hancher, M., Dixon, M., Ilyushchenko, S., Thau, D., & Moore, R. (2017). "
         "Google Earth Engine: Planetary-scale geospatial analysis for everyone. Remote "
@@ -151,6 +178,10 @@ SYN1DEG = "CERES SYN1deg (NASA), vía NASA POWER"
 GPM = "GPM IMERG (satélites de la NASA y JAXA), vía Google Earth Engine"
 MODIS = "MODIS a bordo del satélite Terra (NASA), vía Google Earth Engine"
 GRACE = "GRACE y GRACE-FO (satélites de la NASA y Alemania), vía Google Earth Engine"
+MODIS_AQUA = "MODIS a bordo del satélite Aqua (NASA), vía Google Earth Engine"
+OMI = "OMI a bordo del satélite Aura (NASA), vía Google Earth Engine"
+FLDAS = "FLDAS (modelo hidrológico de la NASA), vía Google Earth Engine"
+OISST = "OISST (análisis de la NOAA con satélites, boyas y barcos), vía Google Earth Engine"
 
 RES_MERRA2 = "0.5° de latitud × 0.625° de longitud (unos 50 km)"
 _SLV = ("gelaro2017", "gmao_slv", "power")
@@ -173,8 +204,14 @@ class Variable:
     # True si tiene sentido hablar de "cambió un X %" (no aplica a °C: 20 °C no es "el doble" de 10 °C).
     relativo: bool = False
     aviso: str = ""
-    # "power": NASA POWER (reanálisis). "gee": instrumento de satélite por Earth Engine.
+    # "power": por la API de NASA POWER. "gee": por Google Earth Engine.
     origen: str = "power"
+    tipo: str = ""  # vacío: se deduce del origen (ver la propiedad `clase`)
+
+    @property
+    def clase(self) -> str:
+        """Qué clase de dato es: una observación, o el resultado de un modelo."""
+        return self.tipo or ("Observación satelital" if self.origen == "gee" else "Reanálisis o modelo")
 
     @property
     def nombre_original(self) -> str:
@@ -188,12 +225,21 @@ class Variable:
 TEMPERATURA = "Temperatura"
 HIDRO = "Hidrología"
 HUMEDAD = "Humedad atmosférica"
-AIRE = "Aire y viento"
+AIRE = "Atmósfera"
+OCEANO = "Océano"
 VEGETACION = "Vegetación"
-CATEGORIAS = (TEMPERATURA, HIDRO, HUMEDAD, AIRE, VEGETACION)
+CATEGORIAS = (TEMPERATURA, HIDRO, HUMEDAD, AIRE, OCEANO, VEGETACION)
 
-# No se incluyen nubosidad, radiación solar ni albedo: POWER los toma de CERES SYN1deg, que
-# tiene saltos artificiales cuando cambian los satélites (2001, 2017-2018, 2022).
+# Variables que se evaluaron y NO se incluyen, por no pasar el filtro de calidad
+# (validacion/calidad_de_datos.py):
+# - Nubosidad, radiación solar y albedo de CERES SYN1deg (vía POWER): saltos artificiales
+#   cuando cambian los satélites (2001, 2017-2018, 2022).
+# - Temperatura del suelo de MODIS Terra (MOD21C3): escalón en 2020 en 5 de 6 sitios
+#   distantes, compatible con la deriva de la órbita de Terra.
+# - Vapor de agua de MODIS Terra (MOD08_M3): su tendencia contradice en signo a MERRA-2 en 4
+#   de 7 sitios, con un quiebre común en 2008.
+# - Temperatura del tope de las nubes (MOD08_M3) y presión del tope de la capa límite
+#   (POWER): escala u interpretación dudosas.
 
 CATALOGO: tuple[Variable, ...] = (
     # --- Temperatura ---
@@ -319,7 +365,18 @@ CATALOGO: tuple[Variable, ...] = (
              "Presión en la tropopausa según la estimación combinada (blended) de MERRA-2. "
              "Un descenso de presión indica una tropopausa más alta.",
              "MERRA-2, campo TROPPB de la colección tavg1_2d_slv_Nx.", _SLV, relativo=True),
-    Variable("AOD_55", "Espesor óptico de aerosoles", "AOD", AIRE,
+    Variable("TROPT", "Temperatura de la tropopausa", "°C", AIRE,
+             "Qué tan frío está el \"techo\" de la capa de aire donde ocurre el clima, a unos "
+             "10 a 17 km de altura.",
+             "Temperatura del aire en la tropopausa, el límite entre la troposfera y la "
+             "estratosfera. Describe un nivel alto de la atmósfera, no la superficie.",
+             "MERRA-2, campo TROPT de la colección tavg1_2d_slv_Nx.", _SLV),
+    Variable("SLP", "Presión a nivel del mar", "kPa", AIRE,
+             "La presión del aire ajustada como si el lugar estuviera al nivel del mar, para "
+             "poder comparar sitios a distinta altitud.",
+             "Presión atmosférica reducida al nivel medio del mar.",
+             "MERRA-2, campo SLP de la colección tavg1_2d_slv_Nx.", _SLV, relativo=True),
+    Variable("AOD_55", "Espesor óptico de aerosoles (modelo)", "AOD", AIRE,
              "Qué tanto bloquean la luz el polvo, el humo y la contaminación. Se mide con "
              "un índice llamado AOD: cerca de 0 el aire es muy limpio; arriba de 0.4 ya se "
              "ve turbio.",
@@ -369,6 +426,82 @@ CATALOGO: tuple[Variable, ...] = (
              ("didan2021", "huete2002", "gorelick2017"), fuente=MODIS,
              resolucion="1 km nativo, muestreado a 0.5° (unos 50 km)", desde=2000,
              relativo=True, origen="gee"),
+    Variable("MODIS_EVI", "Índice de vegetación mejorado EVI (MODIS)", "EVI", VEGETACION,
+             "Otra forma de medir qué tan verde está la superficie. Distingue mejor que el NDVI "
+             "en selvas y bosques muy densos.",
+             "Índice de Vegetación Mejorado: usa las bandas roja, infrarroja cercana y azul para "
+             "reducir el efecto de la atmósfera y del suelo, y no se satura con vegetación densa. "
+             "Compuesto mensual.",
+             "MODIS/Terra MOD13A3 V061, banda EVI; colección MODIS/061/MOD13A3 de Google Earth Engine.",
+             ("didan2021", "huete2002", "gorelick2017"), fuente=MODIS,
+             resolucion="1 km nativo, muestreado a 0.5° (unos 50 km)", desde=2000,
+             relativo=True, origen="gee"),
+    Variable("MODIS_AOD", "Espesor óptico de aerosoles (MODIS)", "AOD", AIRE,
+             "Qué tanto bloquean la luz el polvo, el humo y la contaminación, medido "
+             "directamente por el satélite.",
+             "Espesor óptico de aerosoles a 0.55 µm sobre tierra y océano, promedio mensual de "
+             "las recuperaciones del instrumento MODIS. Adimensional.",
+             "MODIS/Terra MOD08_M3 V061, campo Aerosol_Optical_Depth_Land_Ocean_Mean_Mean; "
+             "colección MODIS/061/MOD08_M3 de Google Earth Engine.",
+             ("platnick2015", "gorelick2017"), fuente=MODIS, resolucion="1° × 1° (unos 100 km)",
+             desde=2000, relativo=True, origen="gee"),
+    Variable("MODIS_NUBES", "Nubosidad (MODIS)", "%", AIRE,
+             "Qué parte del cielo está cubierta por nubes, vista desde el satélite.",
+             "Fracción del área cubierta por nubes según la máscara de nubes de MODIS, promedio "
+             "mensual, en porcentaje.",
+             "MODIS/Terra MOD08_M3 V061, campo Cloud_Fraction_Mean_Mean; colección "
+             "MODIS/061/MOD08_M3 de Google Earth Engine.",
+             ("platnick2015", "gorelick2017"), fuente=MODIS, resolucion="1° × 1° (unos 100 km)",
+             desde=2000, origen="gee"),
+    Variable("OMI_OZONO", "Ozono total en columna (OMI)", "unidades Dobson", AIRE,
+             "Cantidad total de ozono sobre el lugar, medida por el instrumento OMI.",
+             "Ozono total en columna recuperado por el Ozone Monitoring Instrument a bordo del "
+             "satélite Aura. Promedio mensual de las observaciones diarias.",
+             "TOMS and OMI Merged Ozone Data v3, banda ozone; colección TOMS/MERGED de Google "
+             "Earth Engine. Solo se usa el periodo de OMI, desde 2005.",
+             ("levelt2006", "gorelick2017"), fuente=OMI, resolucion="1° × 1° (unos 100 km)",
+             desde=2005, relativo=True, origen="gee",
+             aviso="La colección mezcla varios instrumentos desde 1978; aquí se analiza solo el "
+                   "periodo de OMI para no confundir un cambio de instrumento con una tendencia."),
+    Variable("FLDAS_ESCURRIMIENTO", "Escurrimiento (FLDAS)", "mm/día", HIDRO,
+             "El agua de lluvia y deshielo que no se queda en el suelo y corre hacia arroyos, "
+             "ríos y acuíferos.",
+             "Escurrimiento total simulado: superficial más subterráneo (flujo base). Es una "
+             "estimación de un modelo de superficie terrestre, no un caudal medido en un río.",
+             "FLDAS Noah (forzado con MERRA-2 y CHIRPS), campos Qs_tavg + Qsb_tavg; colección "
+             "NASA/FLDAS/NOAH01/C/GL/M/V001 de Google Earth Engine.",
+             ("mcnally2017", "mcnally2018", "gorelick2017"), fuente=FLDAS,
+             resolucion="0.1° nativo, muestreado a 0.5° (unos 50 km)", desde=1982,
+             relativo=True, origen="gee", tipo="Modelo de superficie terrestre"),
+    # --- Océano ---
+    Variable("MAR_SST", "Temperatura de la superficie del mar", "°C", OCEANO,
+             "Qué tan caliente está el agua en la superficie del mar.",
+             "Temperatura de la superficie del mar del análisis OISST, que combina satélites, "
+             "boyas y barcos por interpolación óptima. Promedio mensual de los campos diarios.",
+             "NOAA OISST v2.1, banda sst; colección NOAA/CDR/OISST/V2_1 de Google Earth Engine.",
+             ("huang2021", "reynolds2008", "gorelick2017"), fuente=OISST,
+             resolucion="0.25° nativo, muestreado a 0.5° (unos 50 km)", desde=1982, origen="gee",
+             tipo="Análisis de observaciones"),
+    Variable("MAR_SST_MODIS", "Temperatura de la superficie del mar (MODIS)", "°C", OCEANO,
+             "La temperatura del agua en la superficie del mar, medida por el satélite Aqua.",
+             "Temperatura de la superficie del mar recuperada en el infrarrojo por MODIS Aqua, "
+             "en cielo despejado. Promedio mensual de los campos diarios.",
+             "MODIS Aqua L3 SMI, banda sst; colección NASA/OCEANDATA/MODIS-Aqua/L3SMI de Google "
+             "Earth Engine.",
+             ("obpg2022", "gorelick2017"), fuente=MODIS_AQUA,
+             resolucion="4 km nativo, muestreado a 0.5° (unos 50 km)", desde=2003, origen="gee"),
+    Variable("MAR_CLOROFILA", "Clorofila del océano (MODIS)", "mg/m³", OCEANO,
+             "Cuánta clorofila hay en el agua: indica la cantidad de fitoplancton, las plantas "
+             "microscópicas de las que depende la vida marina.",
+             "Concentración de clorofila a cerca de la superficie, estimada por el color del "
+             "océano. Promedio mensual de los campos diarios.",
+             "MODIS Aqua L3 SMI, banda chlor_a; colección NASA/OCEANDATA/MODIS-Aqua/L3SMI de "
+             "Google Earth Engine.",
+             ("obpg2022", "gorelick2017"), fuente=MODIS_AQUA,
+             resolucion="4 km nativo, muestreado a 0.5° (unos 50 km)", desde=2003,
+             relativo=True, origen="gee",
+             aviso="La clorofila tiene una distribución muy asimétrica: unos pocos florecimientos "
+                   "intensos pesan mucho en el promedio."),
 )
 
 # Nombre con el que el proveedor publica cada variable (para buscarla en su documentación).
@@ -387,6 +520,15 @@ NOMBRES_ORIGINALES = {
     "GPM_LLUVIA": "Merged satellite-gauge precipitation estimate (precipitation)",
     "GRACE_AGUA": "Liquid Water Equivalent Thickness (lwe_thickness)",
     "MODIS_NDVI": "Normalized Difference Vegetation Index (NDVI)",
+    "MODIS_EVI": "Enhanced Vegetation Index (EVI)",
+    "MODIS_AOD": "Aerosol optical thickness at 0.55 microns for both ocean and land",
+    "MODIS_NUBES": "Cloud Fraction (Cloud_Fraction_Mean_Mean)",
+    "OMI_OZONO": "Total column ozone (ozone)",
+    "FLDAS_ESCURRIMIENTO": "Storm surface runoff + Baseflow-groundwater runoff (Qs_tavg, Qsb_tavg)",
+    "MAR_SST": "Daily sea surface temperature (sst)",
+    "MAR_SST_MODIS": "Sea surface temperature (sst)",
+    "MAR_CLOROFILA": "Chlorophyll a concentration (chlor_a)",
+    "TROPT": "Tropopause Temperature", "SLP": "Sea Level Pressure",
 }
 
 # Por qué importa cada variable para el sistema Tierra.
@@ -418,6 +560,36 @@ RELEVANCIA = {
     "GPM_LLUVIA": "Es una observación de la precipitación independiente de los modelos, disponible incluso donde no hay pluviómetros.",
     "GRACE_AGUA": "Es la única medición satelital del agua total almacenada en una región, incluida la subterránea.",
     "MODIS_NDVI": "Refleja la cantidad y la salud de la vegetación: responde a sequías, deforestación, riego y cambios de uso del suelo.",
+    "MODIS_EVI": "Complementa al NDVI donde este se satura; permite confirmar con un segundo índice si la vegetación cambia.",
+    "MODIS_AOD": "Es una observación directa de los aerosoles, que afectan la salud, la luz solar que llega al suelo y las nubes.",
+    "MODIS_NUBES": "Las nubes regulan cuánta energía del Sol entra y cuánta sale: son la mayor incertidumbre del clima.",
+    "OMI_OZONO": "Es la vigilancia satelital directa de la capa de ozono, que absorbe la radiación ultravioleta dañina.",
+    "FLDAS_ESCURRIMIENTO": "Determina cuánta agua llega a ríos, presas y acuíferos: es la base del abasto de agua y del riesgo de inundación.",
+    "MAR_SST": "El océano absorbe la mayor parte del calor que gana el planeta; su temperatura controla huracanes, corales y pesquerías.",
+    "MAR_SST_MODIS": "Es una medición satelital independiente de la temperatura del mar, que permite confirmar el análisis de largo plazo.",
+    "MAR_CLOROFILA": "El fitoplancton es la base de la cadena alimentaria marina y produce cerca de la mitad del oxígeno del planeta.",
+    "TROPT": "La tropopausa es un nivel alto de la atmósfera: su temperatura responde distinto que la superficie al cambio climático.",
+    "SLP": "Sus cambios sostenidos revelan desplazamientos de los sistemas de alta y baja presión que organizan el clima.",
 }
 
 POR_CODIGO: dict[str, Variable] = {v.codigo: v for v in CATALOGO}
+
+# Variables que solo tienen sentido sobre tierra firme. Sobre mar abierto no se muestran:
+# GRACE ahí mide masa del océano, no agua terrestre, y el reanálisis no tiene suelo.
+SOLO_TIERRA = frozenset({
+    "GWETTOP", "GWETROOT", "EVLAND", "PRECSNOLAND", "SNODP",
+    "GRACE_AGUA", "MODIS_NDVI", "MODIS_EVI", "FLDAS_ESCURRIMIENTO",
+})
+# Las del océano (categoría OCEANO) solo se muestran donde hay mar: los sensores de color
+# del océano también "ven" ríos y lagos, pero ahí sus algoritmos no son válidos.
+SOLO_MAR = frozenset(v.codigo for v in CATALOGO if v.categoria == OCEANO)
+
+# Pares de variables que miden lo mismo con fuentes independientes. Si las dos coinciden en
+# el signo de la tendencia, el resultado no depende de un solo instrumento o modelo.
+PAREJAS = {
+    "MODIS_AOD": "AOD_55", "AOD_55": "MODIS_AOD",
+    "OMI_OZONO": "TO3", "TO3": "OMI_OZONO",
+    "GPM_LLUVIA": "PRECTOTCORR", "PRECTOTCORR": "GPM_LLUVIA",
+    "MAR_SST_MODIS": "MAR_SST", "MAR_SST": "MAR_SST_MODIS",
+    "MODIS_EVI": "MODIS_NDVI", "MODIS_NDVI": "MODIS_EVI",
+}

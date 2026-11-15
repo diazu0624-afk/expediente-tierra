@@ -226,3 +226,30 @@ def test_recorrido_animado_generado_y_completo():
     assert html.count('<section class="escena') == 11 and "__DATOS__" not in html and "const AUTO = true;" in html
     datos = {"sitio": "X", "variables": 27, "exploracion": [], "pruebas": []}
     assert '"sitio": "X"' in demo.demo_html(datos) and "const AUTO = false;" in demo.demo_html(datos, reproducir_sola=False)
+
+
+# ---------- regla tierra/mar ----------
+
+def _tabla_de_sitio(**columnas):
+    meses = pd.date_range("2003-01-01", periods=24, freq="MS")
+    return pd.DataFrame({k: (np.full(24, np.nan) if v is None else np.full(24, v)) for k, v in columnas.items()}, index=meses)
+
+
+def test_en_tierra_firme_no_se_muestran_las_variables_del_mar():
+    from expediente.sitio import fuera_de_lugar
+    from expediente.variables import SOLO_MAR
+    # Un río visto por el sensor de color del océano: hay "temperatura del mar" de MODIS, pero no OISST.
+    tabla = _tabla_de_sitio(GWETROOT=0.6, MAR_SST_MODIS=30.0)
+    assert fuera_de_lugar(tabla) == SOLO_MAR and "MAR_SST_MODIS" in SOLO_MAR
+
+
+def test_en_mar_abierto_no_se_muestran_las_variables_de_tierra():
+    from expediente.sitio import fuera_de_lugar
+    from expediente.variables import SOLO_TIERRA
+    tabla = _tabla_de_sitio(GWETROOT=None, MAR_SST=26.0, GRACE_AGUA=1.0)
+    assert fuera_de_lugar(tabla) == SOLO_TIERRA and "GRACE_AGUA" in SOLO_TIERRA
+
+
+def test_en_la_costa_se_muestran_las_dos():
+    from expediente.sitio import fuera_de_lugar
+    assert fuera_de_lugar(_tabla_de_sitio(GWETROOT=0.4, MAR_SST=5.0)) == frozenset()

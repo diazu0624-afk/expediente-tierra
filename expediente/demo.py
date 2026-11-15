@@ -15,22 +15,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import caso, datos, datos_gee, region
+from . import caso, datos_gee, region
+from .sitio import tabla_del_punto
 from .variables import CATALOGO, POR_CODIGO
 
 RUTA = Path(__file__).resolve().parent.parent / "static" / "demo.html"
 DELHI = ("Nueva Delhi, India", 28.61, 77.21)
 PEKIN = ("Pekín, China", 39.90, 116.40)
 LADO = 8
-
-
-def _punto(lat: float, lon: float) -> pd.DataFrame:
-    tabla = datos.descargar_power(lat, lon, [v.codigo for v in CATALOGO if v.origen == "power"])
-    for v in CATALOGO:
-        if v.origen == "gee":
-            serie = datos_gee.serie_del_punto(datos_gee.descargar_cubo(lat, lon, v.codigo), lat, lon)
-            tabla = tabla.join(serie.rename(v.codigo), how="outer")
-    return tabla
 
 
 def _redondo(valores, cifras: int = 3) -> list:
@@ -55,7 +47,7 @@ def _serie(r: caso.Interrogatorio) -> dict:
 def datos_de_demo() -> dict:
     """Todo lo que la animación muestra, calculado con el mismo código que usa la app."""
     nombre, lat, lon = DELHI
-    tabla = _punto(lat, lon)
+    tabla = tabla_del_punto(lat, lon)
     exploracion = caso.escanear(tabla).dropna(subset=["estandarizada"])
     agua = POR_CODIGO["GRACE_AGUA"]
     r = caso.interrogar(tabla["GRACE_AGUA"], agua)
@@ -63,7 +55,7 @@ def datos_de_demo() -> dict:
     resumen = region.resumen(mapa)
     aerosoles = POR_CODIGO["AOD_55"]
     a = caso.interrogar(tabla["AOD_55"], aerosoles)
-    b = caso.interrogar(_punto(PEKIN[1], PEKIN[2])["AOD_55"], aerosoles)
+    b = caso.interrogar(tabla_del_punto(PEKIN[1], PEKIN[2])["AOD_55"], aerosoles)
     return {
         "sitio": nombre,
         "variables": len(CATALOGO),
