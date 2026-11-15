@@ -6,46 +6,38 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
-from . import datos, datos_gee, extremos
-from .variables import CATALOGO, SOLO_MAR, SOLO_TIERRA
+from .datos import ErrorDeDatos
+from .fuentes import FUENTES, FuenteDeDatos
+from .variables import SOLO_MAR, SOLO_TIERRA
 
 MAR_DE_REFERENCIA = "MAR_SST"
 SUELO_DE_REFERENCIA = "GWETROOT"
 
 
-def _serie_de_satelite(lat: float, lon: float, codigo: str) -> pd.Series | None:
+def _series_de(fuente: FuenteDeDatos, lat: float, lon: float) -> pd.DataFrame | None:
+    """Lo que una fuente tiene del punto; None si falló y el análisis puede seguir sin ella."""
     try:
-        serie = datos_gee.serie_del_punto(datos_gee.descargar_cubo(lat, lon, codigo), lat, lon)
-    except datos.ErrorDeDatos:
-        return None  # sin sesión de Earth Engine: el análisis sigue con las demás variables
-    return None if serie.empty else serie.rename(codigo)
-
-
-def _extremos(lat: float, lon: float) -> pd.DataFrame | None:
-    try:
-        return extremos.tabla_de_extremos(lat, lon)
-    except datos.ErrorDeDatos:
-        return None  # sin datos diarios: el análisis sigue con las series mensuales
+        return fuente.series_del_punto(lat, lon, fuente.variables())
+    except ErrorDeDatos:
+        if fuente.indispensable:
+            raise
+        return None
 
 
 def tabla_del_punto(lat: float, lon: float) -> pd.DataFrame:
-    """Series de un punto: reanálisis mensual por NASA POWER, lo que responda Earth Engine y
-    los índices anuales de extremos (un valor por año, fechado el 1 de julio).
+    """Series de un punto, de todas las fuentes: reanálisis mensual, satélites y modelos, e
+    índices anuales de extremos (un valor por año, fechado el 1 de julio).
 
     Filas = meses, columnas = códigos de variable. Las variables que no existen en el punto
-    (las del océano en tierra firme, por ejemplo) simplemente no aparecen.
+    (las del océano en tierra firme, por ejemplo) simplemente no aparecen. A cada fuente se le
+    pide lo mismo, `series_del_punto`, y todas se consultan a la vez.
     """
-    tabla = datos.descargar_power(lat, lon, [v.codigo for v in CATALOGO if v.origen == "power"])
-    codigos = [v.codigo for v in CATALOGO if v.origen == "gee"]
-    with ThreadPoolExecutor(6) as ejecutor:
-        de_extremos = ejecutor.submit(_extremos, lat, lon)
-        series = list(ejecutor.map(lambda codigo: _serie_de_satelite(lat, lon, codigo), codigos))
-        indices = de_extremos.result()
-    for serie in series:
-        if serie is not None:
-            tabla = tabla.join(serie, how="outer")
-    if indices is not None:
-        tabla = tabla.join(indices, how="outer")
+    with ThreadPoolExecutor(len(FUENTES)) as ejecutor:
+        partes = list(ejecutor.map(lambda fuente: _series_de(fuente, lat, lon), FUENTES))
+    tabla = pd.DataFrame()
+    for parte in partes:
+        if parte is not None and parte.shape[1]:
+            tabla = parte if tabla.empty else tabla.join(parte, how="outer")
     return tabla.drop(columns=[c for c in tabla.columns if c in fuera_de_lugar(tabla)])
 
 

@@ -14,6 +14,7 @@ import streamlit as st
 import streamlit.components.v1 as componentes
 
 from expediente import caso, datos, datos_gee, graficas, idioma, informe, laboratorio, region, sitio as sitios, veredicto
+from expediente.fuentes import fuente_de
 from expediente.idioma import T, tr
 from expediente.variables import (CATALOGO, CATEGORIAS, METODOS, PAREJAS, POR_CODIGO, REFERENCIAS, SOLO_MAR, Variable,
                                   independencia)
@@ -260,11 +261,8 @@ def cargar_analisis(lat: float, lon: float, codigo: str, periodo: Periodo,
 
 @st.cache_data(show_spinner=False)
 def cargar_region(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFrame:
-    if POR_CODIGO[codigo].origen == "gee":
-        return datos_gee.recortar(datos_gee.descargar_cubo(lat, lon, codigo), lat, lon, lado)
-    if POR_CODIGO[codigo].origen == "diario":
-        raise datos.ErrorDeDatos("Los índices de extremos se calculan con datos diarios, que solo existen para el punto.")
-    return datos.descargar_region(lat, lon, codigo, lado)
+    variable = POR_CODIGO[codigo]
+    return fuente_de(variable).cubo_de_la_region(lat, lon, variable, lado)
 
 
 @st.cache_data(show_spinner=False)
