@@ -8,7 +8,7 @@ cambio es estadísticamente significativo.
 **En cifras:** 46 variables de tierra, atmósfera y océano (26 de reanálisis vía NASA POWER, 12
 de satélites y modelos vía Google Earth Engine y 8 índices de extremos con datos diarios); 6
 páginas; cinco pruebas de significancia validadas por simulación; interfaz e informe en español
-y en inglés; 64 pruebas automáticas.
+y en inglés; 68 pruebas automáticas.
 
 **Contenido**
 
@@ -113,7 +113,8 @@ flowchart TD
         INFO["informe.py<br/>informe HTML con SVG"]
     end
     subgraph Análisis
-        CASO["caso.py<br/>exploración, cinco pruebas,<br/>temporadas y relación entre variables"]
+        CASO["caso.py<br/>exploración, análisis de una serie,<br/>temporadas y relación entre variables"]
+        PRU["pruebas.py<br/>las cinco pruebas, una clase cada una"]
         REG["region.py<br/>mapa por celda y promedio de un área"]
         LAB["laboratorio.py<br/>simulación de falsos positivos"]
     end
@@ -124,7 +125,9 @@ flowchart TD
     end
     subgraph Datos
         SIT["sitio.py<br/>todas las variables de un punto"]
-        DAT["datos.py<br/>NASA POWER mensual, geocodificador, caché"]
+        FUE["fuentes.py<br/>una clase por fuente de datos"]
+        DAT["datos.py<br/>NASA POWER mensual, geocodificador"]
+        CAC["cache.py<br/>caché en disco"]
         EXT["extremos.py<br/>NASA POWER diario, índices ETCCDI"]
         GEE["datos_gee.py<br/>Earth Engine: recuadro, país, mundo"]
     end
@@ -135,9 +138,12 @@ flowchart TD
     GRAF & INFO & VERE & LAB --> EST
     GRAF & INFO --> VAR
     REG --> CASO & EST & VAR
-    CASO --> EST & VAR & IDI
+    CASO --> PRU & EST & VAR & IDI
+    PRU --> EST & VAR & IDI
     VAR --> IDI
-    SIT --> DAT & EXT & GEE & VAR
+    SIT --> FUE & VAR
+    FUE --> DAT & EXT & GEE & VAR
+    DAT --> CAC
     EXT & GEE --> DAT
 ```
 
@@ -182,12 +188,16 @@ expediente-tierra/
 │   ├── variables.py            Catálogo de 46 variables y 37 referencias con DOI
 │   ├── variables_en.py         El catálogo en inglés
 │   ├── idioma.py               Idioma de la sesión y textos bilingües
-│   ├── datos.py                NASA POWER (punto y región), geocodificador y caché
+│   ├── cache.py                Clase CacheEnDisco: tablas descargadas y sus fechas
+│   ├── datos.py                NASA POWER (punto y región) y geocodificador
 │   ├── datos_gee.py            Google Earth Engine: 12 variables; cubos de un recuadro, un país o el mundo
+│   ├── fuentes.py              Jerarquía FuenteDeDatos: POWER mensual, Earth Engine, POWER diario
 │   ├── sitio.py                Todas las variables de un punto; regla tierra/mar
 │   ├── extremos.py             Índices anuales de extremos con datos diarios de POWER
 │   ├── laboratorio.py          Simulación en vivo de falsos positivos
 │   ├── estadistica.py          Motor estadístico: pruebas, estimadores, bootstrap
+│   ├── pruebas.py              Jerarquía PruebaDeSignificancia: las cinco pruebas
+│   ├── formato.py              Cómo se escriben los números
 │   ├── caso.py                 Exploración de variables y análisis de una serie
 │   ├── region.py               Mapa de tendencias por celda y promedio regional
 │   ├── veredicto.py            Redacción del resultado, ficha técnica y avisos
@@ -196,7 +206,7 @@ expediente-tierra/
 │   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
-│   └── test_caso.py            39 pruebas: análisis, región, informe, temporadas, extremos, territorios, laboratorio e idioma
+│   └── test_caso.py            43 pruebas: análisis, región, informe, temporadas, extremos, territorios, laboratorio, idioma y diseño de clases
 ├── validacion/                 Simulaciones de Monte Carlo y filtro de calidad de datos
 │   ├── calibracion.py          Falsos positivos y potencia de cada prueba
 │   ├── veredictos.py           Falsos positivos y potencia del resultado completo
@@ -231,7 +241,115 @@ que usaba la metáfora de un detective. Esta tabla los relaciona.
 
 ## 5. Objetos
 
-Todos son `dataclass` inmutables (`frozen=True`): se crean una vez y no cambian.
+### Diseño orientado a objetos
+
+El modelo del problema está hecho de objetos: una variable, la fuente de la que llega, las
+pruebas a las que se somete y el análisis que resulta. Alrededor hay módulos de funciones que
+prestan servicios a esos objetos (las fórmulas estadísticas, las gráficas, el informe y la
+interfaz). Esta sección dice qué es cada cosa; al final hay una guía para leer el código
+viniendo de Java.
+
+```mermaid
+classDiagram
+    class PruebaDeSignificancia {
+        <<abstracta>>
+        +nombre str
+        +pregunta str
+        +evaluar(serie) ResultadoDePrueba
+    }
+    PruebaDeSignificancia <|-- MannKendallConPreblanqueo
+    PruebaDeSignificancia <|-- PruebaTDeLaPendiente
+    PruebaDeSignificancia <|-- IntervaloDeConfianza
+    PruebaDeSignificancia <|-- AgregacionAnual
+    PruebaDeSignificancia <|-- SensibilidadAUnAnio
+    PruebaDeSignificancia <|-- SensibilidadAlPeriodo
+    PruebaDeSignificancia ..> SerieAnalizada : evalúa
+    PruebaDeSignificancia ..> ResultadoDePrueba : produce
+
+    class FuenteDeDatos {
+        <<abstracta>>
+        +origen str
+        +indispensable bool
+        +variables() tuple
+        +series_del_punto(lat, lon, variables) DataFrame
+        +cubo_de_la_region(lat, lon, variable, lado) DataFrame
+    }
+    FuenteDeDatos <|-- PowerMensual
+    FuenteDeDatos <|-- EarthEngine
+    FuenteDeDatos <|-- PowerDiario
+    FuenteDeDatos ..> Variable : entrega datos de
+    PowerMensual ..> CacheEnDisco
+    EarthEngine ..> CacheEnDisco
+    PowerDiario ..> CacheEnDisco
+
+    class CacheEnDisco {
+        -carpeta
+        -indice
+        -dias_de_vigencia
+        +ruta(nombre) Path
+        +vigente(ruta) bool
+        +leer(ruta) DataFrame
+        +guardar(tabla, ruta)
+        +fecha_de_descarga(ruta) date
+    }
+
+    class Interrogatorio {
+        +variable Variable
+        +regresion Regresion
+        +pruebas tuple
+        +nivel str
+        +pendiente_decada float
+        +muestra str
+    }
+    Interrogatorio o-- Variable
+    Interrogatorio o-- "5" ResultadoDePrueba
+    Interrogatorio o-- Regresion
+    Veredicto ..> Interrogatorio : se redacta a partir de
+```
+
+**Dónde está cada pilar**
+
+| Pilar | Dónde se ve | Qué significa aquí |
+|---|---|---|
+| Abstracción | `PruebaDeSignificancia` (`pruebas.py`) y `FuenteDeDatos` (`fuentes.py`) | Clases abstractas: dicen qué sabe hacer una prueba o una fuente sin decir cómo. Quien las usa solo conoce `evaluar()` o `series_del_punto()` |
+| Encapsulamiento | `CacheEnDisco` (`cache.py`); `Interrogatorio` (`caso.py`); `Variable` (`variables.py`) | La caché guarda su carpeta, su índice y su plazo como atributos privados y solo ofrece `vigente`, `leer` y `guardar`. El análisis es inmutable y entrega sus cifras derivadas (`nivel`, `pendiente_decada`, `muestra`) por propiedades. La variable guarda sus textos en español y los entrega en el idioma de la sesión |
+| Herencia | Seis subclases de `PruebaDeSignificancia`; tres de `FuenteDeDatos`; `CasoImposible(ValueError)` y `ErrorDeDatos(RuntimeError)`; `Dicc(dict)` | Las subclases heredan lo común (cómo se arma un resultado, qué variables atiende una fuente, que por omisión no hay datos por región) y añaden lo propio |
+| Polimorfismo | `caso.interrogar` recorre `bateria(serie)` y llama `prueba.evaluar(serie)`; `sitio.tabla_del_punto` recorre `FUENTES` y llama `fuente.series_del_punto(...)`; `app.cargar_region` llama `fuente_de(variable).cubo_de_la_region(...)` | El mismo mensaje, enviado a objetos de clases distintas, hace en cada una lo que corresponde. No hay `if` que pregunte de qué tipo es la prueba o la fuente |
+
+**Lo que no es un objeto, y por qué**
+
+- `estadistica.py` son funciones puras sobre arreglos (entran números, salen números). Es el
+  equivalente de una clase utilitaria de métodos estáticos, como `java.lang.Math`. Así se
+  pueden validar por simulación sin montar nada alrededor.
+- `graficas.py`, `informe.py` y `veredicto.py` son funciones que reciben un `Interrogatorio`
+  y devuelven una figura, un HTML o un texto.
+- `app.py` es el guion de la interfaz: Streamlit lo ejecuta de arriba abajo en cada
+  interacción, y cada `pagina_*` es una pantalla.
+
+**Guía para quien viene de Java**
+
+| En este código (Python) | Equivalente en Java |
+|---|---|
+| `class PruebaDeSignificancia(ABC)` con `@abstractmethod` | `abstract class` con métodos abstractos (o una `interface`) |
+| `class EarthEngine(FuenteDeDatos)` | `class EarthEngine extends FuenteDeDatos` |
+| `@dataclass(frozen=True) class Regresion` | `record Regresion(...)`: datos inmutables con igualdad por valor |
+| `@property def nivel(self)` | Un getter: se lee como atributo (`r.nivel`), sin paréntesis |
+| `self._carpeta` (guion bajo inicial) | Atributo `private`. En Python es una convención, no lo impide el compilador |
+| `@staticmethod` | Método `static` |
+| Un módulo de funciones (`estadistica.py`) | Una clase `final` de métodos estáticos |
+| `FUENTES = (PowerMensual(), EarthEngine(), PowerDiario())` | Una lista de instancias únicas (singletons) |
+| `def evaluar(self, serie: SerieAnalizada) -> ResultadoDePrueba` | Las anotaciones de tipo documentan, pero no se comprueban al compilar |
+| `raise ErrorDeDatos(...)` / `except ErrorDeDatos` | `throw` / `catch`; todas las excepciones son no comprobadas |
+| `T("español", "english")` | Una búsqueda en un `ResourceBundle` con las dos cadenas a la vista |
+| `tuple[X, ...]`, `X | None` | `List<X>` inmutable, `Optional<X>` |
+
+Para leer el código en orden: `variables.py` (qué se mide), `fuentes.py` (de dónde llega),
+`pruebas.py` (cómo se juzga), `caso.py` (el análisis: `interrogar` devuelve un
+`Interrogatorio`), `veredicto.py` (cómo se redacta) y al final `app.py` (cómo se muestra).
+
+### Clases de datos
+
+Las que siguen son `dataclass` inmutables (`frozen=True`): se crean una vez y no cambian.
 
 ### `Variable` (`variables.py`)
 
@@ -252,7 +370,7 @@ Una entrada del catálogo.
 | `desde` | int | Primer año que se analiza |
 | `relativo` | bool | Si tiene sentido expresar el cambio en porcentaje |
 | `aviso` | str | Advertencia propia de la variable |
-| `origen` | str | `"power"` (reanálisis) o `"gee"` (satélite) |
+| `origen` | str | `"power"` (reanálisis mensual), `"gee"` (Earth Engine) o `"diario"` (índices de extremos): decide su `FuenteDeDatos` |
 | `nombre_original`, `relevancia` | propiedades | Nombre del proveedor y por qué importa la variable |
 
 ### `Referencia` (`variables.py`)
@@ -269,10 +387,46 @@ Una entrada del catálogo.
 | `Regresion` | `pendiente`, `intercepto`, `p_ingenuo`, `r1`, `n`, `n_efectivo`, `p`, `ic_bajo`, `ic_alto`, `r2` | Regresión lineal y prueba t con tamaño de muestra efectivo |
 | `PuntoDeCambio` | `anio`, `antes`, `despues`, `mejora`; propiedad `cambia_de_signo` | Regresión en dos tramos |
 
-### `Prueba` (`caso.py`)
+### `PruebaDeSignificancia` y sus subclases (`pruebas.py`)
 
-Una de las cinco pruebas de significancia, lista para mostrarse: `nombre`, `pregunta`,
-`aprobada`, `resultado` (texto con el valor p) y `explicacion`.
+Clase abstracta. Cada subclase es una de las pruebas y define tres cosas: `nombre`, `pregunta`
+(propiedades, porque se entregan en el idioma de la sesión) y `evaluar(serie)`.
+
+| Subclase | Qué pregunta | Se supera si |
+|---|---|---|
+| `MannKendallConPreblanqueo` | ¿Los valores suben o bajan más seguido de lo que explicaría el azar? | p < 0.05 tras corregir la autocorrelación, en el sentido de la tendencia |
+| `PruebaTDeLaPendiente` | ¿La pendiente de la recta es distinta de cero? | p < 0.05 con tamaño de muestra efectivo |
+| `IntervaloDeConfianza` | ¿El intervalo de confianza de la pendiente excluye el cero? | Los dos extremos quedan del mismo lado del cero |
+| `AgregacionAnual` | ¿La tendencia se mantiene con un dato por año? (series mensuales) | Mann-Kendall anual con p < 0.05 |
+| `SensibilidadAUnAnio` | ¿Se mantiene al excluir cualquier año? (series anuales) | Ninguna exclusión le quita la significancia |
+| `SensibilidadAlPeriodo` | ¿El signo se mantiene al cambiar el año inicial o final? | Al menos 80 % de los periodos conservan el signo |
+
+`bateria(serie)` devuelve las cinco que le tocan a una serie: la cuarta es `AgregacionAnual`
+si la serie es mensual y `SensibilidadAUnAnio` si ya es anual.
+
+`SerieAnalizada` es lo que reciben: la serie, su versión anual y lo ya calculado (regresión,
+intervalo, Mann-Kendall, pendiente de Sen, triángulo de periodos). `ResultadoDePrueba` es lo
+que devuelven, listo para mostrarse: `nombre`, `pregunta`, `aprobada`, `resultado` (texto con
+el valor p) y `explicacion`.
+
+### `FuenteDeDatos` y sus subclases (`fuentes.py`)
+
+Clase abstracta: de dónde sale un grupo de variables y cómo se le piden los datos.
+
+| Subclase | Variables | `series_del_punto` | `cubo_de_la_region` |
+|---|---|---|---|
+| `PowerMensual` | 26 de reanálisis | API mensual de NASA POWER | API regional de POWER |
+| `EarthEngine` | 12 de satélites y modelos | Celda más cercana del cubo de 10°, en paralelo | Recorte del cubo de 10° |
+| `PowerDiario` | 8 índices de extremos | Índices calculados con los datos diarios | No tiene: lanza `ErrorDeDatos` |
+
+`fuente_de(variable)` devuelve la fuente de una variable. `PowerMensual` es `indispensable`:
+si falla, el análisis del punto no puede seguir; si falla otra, sigue sin sus variables.
+
+### `CacheEnDisco` (`cache.py`)
+
+Las tablas ya descargadas y la fecha en que se bajó cada una. Su estado es privado; el resto
+del programa usa `ruta(nombre)`, `vigente(ruta)`, `leer(ruta)`, `guardar(tabla, ruta)` y
+`fecha_de_descarga(ruta)`. Hay una sola instancia, `datos.CACHE`, que comparten las tres fuentes.
 
 ### `Interrogatorio` (`caso.py`)
 
@@ -292,7 +446,7 @@ resultado y el informe.
 | `mk`, `mk_ingenuo` | Mann-Kendall corregido y sin corregir |
 | `pendiente_sen` | Pendiente de Theil-Sen, como contraste robusto |
 | `triangulo`, `fraccion_ventanas` | Tendencia de cada subperiodo y fracción que conserva el signo |
-| `pruebas` | Las cinco `Prueba` |
+| `pruebas` | Los cinco `ResultadoDePrueba` |
 | `anios_necesarios` | Años de datos para detectar una tendencia de ese tamaño |
 | `cambio` | `PuntoDeCambio`, o `None` si la serie es corta |
 
@@ -350,9 +504,11 @@ solo se recalcula lo que depende de ese control.
 6. Calcula el intervalo de confianza de la pendiente por bootstrap.
 7. Aplica Mann-Kendall con corrección de autocorrelación y calcula la pendiente de Theil-Sen.
 8. Recalcula la tendencia en todos los subperiodos posibles.
-9. Aplica la cuarta prueba: Mann-Kendall sobre promedios anuales, o exclusión de un año a
-   la vez si la serie ya es anual.
-10. Reúne las cinco pruebas, calcula los años de datos necesarios y busca el punto de cambio.
+9. Reúne lo calculado en una `SerieAnalizada` y recorre `pruebas.bateria(serie)`: a cada
+   prueba le pide `evaluar(serie)` y guarda su `ResultadoDePrueba`. La cuarta prueba depende de
+   la resolución: Mann-Kendall sobre promedios anuales, o exclusión de un año a la vez si la
+   serie ya es anual.
+10. Calcula los años de datos necesarios y busca el punto de cambio.
 
 El nivel de evidencia sale de contar pruebas superadas: 5 sólida, 4 fuerte, 2 o 3 débil,
 0 o 1 insuficiente.
@@ -537,6 +693,19 @@ Las funciones cuyo nombre empieza con guion bajo son internas del módulo.
 | `interrogar(serie_mensual, variable)` | Análisis completo de una serie; ver 6.2 |
 | `escanear(datos, variables)` | Exploración de todas las variables; ver 6.3 |
 | `promedios_anuales(serie)` | Promedio anual que no se sesga si falta algún mes |
+
+### `expediente/pruebas.py`
+
+| Elemento | Qué hace |
+|---|---|
+| `PruebaDeSignificancia` y seis subclases | Las pruebas; cada una implementa `evaluar(serie)` |
+| `bateria(serie)` | Las cinco pruebas que le tocan a una serie |
+| `SerieAnalizada`, `ResultadoDePrueba` | Lo que una prueba recibe y lo que devuelve |
+
+### `expediente/formato.py`
+
+| Función | Qué hace |
+|---|---|
 | `numero(x, signo, cifras)` | Formato de números con cifras significativas |
 | `valor_p(p)` | Formato de un valor p |
 
@@ -556,7 +725,8 @@ Las funciones cuyo nombre empieza con guion bajo son internas del módulo.
 | `descargar_region(lat, lon, codigo, lado)` | Serie de una variable en cada celda de un recuadro |
 | `caja(lat, lon, lado)` | Límites del recuadro centrado en el punto |
 | `buscar_lugar(texto)` | Coordenadas de un lugar por su nombre |
-| `vigente`, `guardar_en_cache`, `leer_cache`, `fecha_de_descarga`, `fecha_de_datos` | Manejo de la caché y de sus fechas |
+| `fecha_de_datos(lat, lon, codigos)` | Cuándo se bajaron de POWER los datos de un punto |
+| `CACHE` | La instancia de `CacheEnDisco` que comparten las fuentes |
 
 ### `expediente/datos_gee.py`
 
@@ -570,7 +740,7 @@ Las funciones cuyo nombre empieza con guion bajo son internas del módulo.
 
 | Función | Qué hace |
 |---|---|
-| `tabla_del_punto(lat, lon)` | Series mensuales de todas las variables disponibles en un punto |
+| `tabla_del_punto(lat, lon)` | Series de todas las variables disponibles en un punto: le pide lo mismo a cada `FuenteDeDatos` |
 | `fuera_de_lugar(tabla)` | Variables que el punto no puede tener (mar en tierra firme, tierra en mar abierto) |
 
 ### `expediente/veredicto.py`
@@ -625,10 +795,10 @@ Las pruebas provienen de la literatura citada. Los valores de esta tabla marcado
 |---|---|---|---|---|
 | `ALFA` | 0.05 | `estadistica` | Nivel de significancia | Convención |
 | `TOPE_CORRECCION` | 0.15 | `estadistica` | Máximo que suma la corrección de sesgo de la autocorrelación | Criterio del equipo, validado en `series_cortas.py` |
-| `N_PRUEBAS` | 5 | `caso` | Pruebas de significancia | Criterio del equipo |
+| `N_PRUEBAS` | 5 | `pruebas` | Pruebas de significancia | Criterio del equipo |
 | `MIN_ANIOS` | 15 | `caso` | Años mínimos para analizar | Criterio del equipo |
 | `MIN_MESES` | 9 | `caso` | Meses con dato para que un año cuente | Criterio del equipo |
-| `MIN_FRACCION_VENTANAS` | 0.8 | `caso` | Subperiodos que deben conservar el signo | Criterio del equipo |
+| `MIN_FRACCION_VENTANAS` | 0.8 | `pruebas` | Subperiodos que deben conservar el signo | Criterio del equipo |
 | `MAX_REPETIDOS` | 0.2 | `caso` | Fracción de valores repetidos que obliga a cambiar de resolución | Criterio del equipo |
 | `ANIOS_CLIMA` | 30 | `veredicto` | Por debajo se advierte "registro corto" | Periodo de referencia de la OMM |
 | `DIAS_VIGENCIA` | 30 | `datos` | Días tras los que se vuelve a descargar | Criterio del equipo |
@@ -712,7 +882,7 @@ Antes de entrar al catálogo, cada variable se evalúa en siete sitios
 
 ```bash
 .venv/bin/pip install pytest pymannkendall
-.venv/bin/python -m pytest                   # 64 pruebas
+.venv/bin/python -m pytest                   # 68 pruebas
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del resultado completo
 .venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas

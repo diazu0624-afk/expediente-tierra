@@ -456,3 +456,65 @@ def test_el_catalogo_en_ingles_esta_completo_y_no_altera_el_espanol():
         idioma.fijar("es")
     assert POR_CODIGO["T2M"].nombre == "Temperatura del aire"
     assert caso.interrogar(_serie(0.05), POR_CODIGO["T2M"]).pruebas[0].nombre == "Prueba de Mann-Kendall"
+
+
+# ---------- diseño orientado a objetos: pruebas, fuentes y caché ----------
+
+def test_las_cinco_pruebas_comparten_una_interfaz_y_cada_una_responde_a_su_manera():
+    from expediente import pruebas
+    r = caso.interrogar(_serie(0.05), POR_CODIGO["T2M"])
+    serie = pruebas.SerieAnalizada(r.variable, True, r.t, r.y, r.anual.index.to_numpy(dtype=float), r.anual.to_numpy(),
+                                   r.regresion, r.ic_historias, r.mk, r.pendiente_sen, r.triangulo, 13)
+    bateria = pruebas.bateria(serie)
+    assert len(bateria) == pruebas.N_PRUEBAS and all(isinstance(p, pruebas.PruebaDeSignificancia) for p in bateria)
+    assert len({type(p) for p in bateria}) == 5  # cinco clases distintas
+    # Polimorfismo: la misma llamada sobre cada prueba da el resultado que guardó el análisis.
+    assert tuple(p.evaluar(serie) for p in bateria) == r.pruebas
+    assert isinstance(bateria[3], pruebas.AgregacionAnual)
+    anual = pruebas.SerieAnalizada(r.variable, False, serie.anios, serie.anual, serie.anios, serie.anual,
+                                   r.regresion, r.ic_historias, r.mk, r.pendiente_sen, r.triangulo, 13)
+    assert isinstance(pruebas.bateria(anual)[3], pruebas.SensibilidadAUnAnio)
+
+
+def test_la_prueba_abstracta_no_se_puede_usar_sin_definir_su_evaluacion():
+    from expediente import pruebas
+
+    class Incompleta(pruebas.PruebaDeSignificancia):
+        nombre = pregunta = "x"
+
+    with pytest.raises(TypeError):
+        pruebas.PruebaDeSignificancia()
+    with pytest.raises(TypeError):
+        Incompleta()  # le falta evaluar()
+
+
+def test_cada_variable_tiene_su_fuente_y_solo_algunas_tienen_datos_por_region():
+    from expediente import fuentes
+    from expediente.datos import ErrorDeDatos
+    clases = {codigo: type(fuentes.fuente_de(POR_CODIGO[codigo])) for codigo in ("T2M", "GRACE_AGUA", "EXT_TXX")}
+    assert clases == {"T2M": fuentes.PowerMensual, "GRACE_AGUA": fuentes.EarthEngine, "EXT_TXX": fuentes.PowerDiario}
+    assert all(isinstance(f, fuentes.FuenteDeDatos) for f in fuentes.FUENTES)
+    # Entre todas las fuentes cubren el catálogo completo, sin repetir variables.
+    repartidas = [v.codigo for f in fuentes.FUENTES for v in f.variables()]
+    assert sorted(repartidas) == sorted(POR_CODIGO)
+    with pytest.raises(ErrorDeDatos):  # los índices de extremos no tienen datos por región
+        fuentes.fuente_de(POR_CODIGO["EXT_TXX"]).cubo_de_la_region(0.0, 0.0, POR_CODIGO["EXT_TXX"], 8)
+    with pytest.raises(TypeError):
+        fuentes.FuenteDeDatos()
+
+
+def test_la_cache_guarda_lee_y_sabe_cuando_un_archivo_deja_de_estar_vigente(tmp_path):
+    import datetime as dt
+    import json
+    from expediente.cache import CacheEnDisco
+    cache = CacheEnDisco(tmp_path / "cache", dias_de_vigencia=30)
+    ruta = cache.ruta("tabla.csv")
+    assert not cache.vigente(ruta) and cache.fecha_de_descarga(ruta) is None
+    tabla = pd.DataFrame({"T2M": [1.5, 2.5]}, index=pd.to_datetime(["2020-01-01", "2020-02-01"]))
+    cache.guardar(tabla, ruta)
+    assert cache.vigente(ruta) and cache.fecha_de_descarga(ruta) == dt.date.today()
+    assert cache.leer(ruta)["T2M"].tolist() == [1.5, 2.5] and cache.leer(ruta).index[1] == pd.Timestamp("2020-02-01")
+    # Un archivo bajado hace más tiempo que el plazo ya no está vigente.
+    indice = tmp_path / "cache" / "descargas.json"
+    indice.write_text(json.dumps({"tabla.csv": (dt.date.today() - dt.timedelta(days=31)).isoformat()}))
+    assert not cache.vigente(ruta) and ruta.exists()
