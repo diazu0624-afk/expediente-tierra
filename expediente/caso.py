@@ -8,22 +8,21 @@ de evidencia.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import floor, isfinite, log10
 
 import numpy as np
 import pandas as pd
 
 from . import estadistica as est
+from .formato import numero, valor_p  # noqa: F401  (otros módulos los toman de aquí)
 from .idioma import Dicc, T, Tupla
+from .pruebas import MIN_FRACCION_VENTANAS, N_PRUEBAS, ResultadoDePrueba, SerieAnalizada, bateria  # noqa: F401
 from .variables import CATALOGO, Variable
 
 MIN_ANIOS = 15
 MIN_MESES = 9  # meses con dato para que un año cuente
-MIN_FRACCION_VENTANAS = 0.8
 # Si un mismo valor (casi siempre el cero: "no nevó", "no heló") ocupa más de esta parte
 # de la serie, las pruebas dejan de ser confiables a esa resolución.
 MAX_REPETIDOS = 0.2
-N_PRUEBAS = 5
 
 NIVELES = Dicc({
     "solida": ("Evidencia sólida", "Solid evidence"),
@@ -47,20 +46,6 @@ TEMPORADAS: dict[str, tuple[int, ...]] = {
 
 class CasoImposible(ValueError):
     """La variable no se puede analizar en este lugar (faltan datos o casi nunca ocurre)."""
-
-
-def numero(x: float, signo: bool = False, cifras: int = 2) -> str:
-    """Número con `cifras` cifras significativas, sin notación científica."""
-    if not isfinite(x):
-        return "—"
-    if x == 0:
-        return "0"
-    decimales = min(max(cifras - 1 - floor(log10(abs(x))), 0), 8)
-    return f"{x:+,.{decimales}f}" if signo else f"{x:,.{decimales}f}"
-
-
-def valor_p(p: float) -> str:
-    return "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
 
 
 def promedios_anuales(serie: pd.Series) -> pd.Series:
@@ -149,15 +134,6 @@ def _motivo_imposible(anual: pd.Series) -> str:
 
 
 @dataclass(frozen=True)
-class Prueba:
-    nombre: str
-    pregunta: str
-    aprobada: bool
-    resultado: str
-    explicacion: str
-
-
-@dataclass(frozen=True)
 class Interrogatorio:
     variable: Variable
     resolucion: str  # "mensual" (anomalías sin ciclo estacional) o "anual" (promedios)
@@ -173,7 +149,7 @@ class Interrogatorio:
     pendiente_sen: float
     triangulo: pd.DataFrame
     fraccion_ventanas: float
-    pruebas: tuple[Prueba, ...]
+    pruebas: tuple[ResultadoDePrueba, ...]
     anios_necesarios: float
     cambio: est.PuntoDeCambio | None  # regresión en dos tramos sobre los promedios anuales
     meses: tuple[int, ...] = TODO_EL_ANIO  # meses del año que entran al análisis
@@ -255,20 +231,6 @@ class Interrogatorio:
         return self.cambio_total / sigma if sigma > 0 else None
 
 
-def _mk_confirma(mk: est.MannKendallSinMemoria, signo: float) -> bool:
-    return mk.prueba.p < est.ALFA and np.sign(mk.prueba.s) == signo
-
-
-def _sobrevive_sin_un_anio(anios: np.ndarray, valores: np.ndarray, signo: float) -> tuple[bool, int]:
-    """¿La tendencia sigue siendo significativa al quitar cualquier año? Devuelve (sí/no, fallos)."""
-    fallos = 0
-    for k in range(anios.size):
-        mk = est.mann_kendall_sin_memoria(np.delete(anios, k), np.delete(valores, k))
-        if not _mk_confirma(mk, signo):
-            fallos += 1
-    return fallos == 0, fallos
-
-
 def interrogar(serie_mensual: pd.Series, variable: Variable,
                meses: tuple[int, ...] = TODO_EL_ANIO) -> Interrogatorio:
     """Somete una variable a las cinco pruebas.
@@ -296,118 +258,21 @@ def interrogar(serie_mensual: pd.Series, variable: Variable,
     if mensual:
         t = np.asarray(anomalias.index.year + (anomalias.index.month - 0.5) / 12, dtype=float)
         y = anomalias.to_numpy()
-        dato, datos_txt = T("mes", "month"), T("meses", "months")
     else:
         t, y = anios, anual.to_numpy()
-        dato, datos_txt = T("año", "year"), T("años", "years")
 
     regresion = est.regresion_lineal(t, y)
     ic_historias = est.ic_historias_alternativas(t, y)
     mk = est.mann_kendall_sin_memoria(t, y)
     sen = est.pendiente_sen(t, y).pendiente
-    signo = np.sign(regresion.pendiente)
-
     largo_min = max(10, len(anual) // 3)
     triangulo = est.triangulo_de_ventanas(anios, anual.to_numpy(), largo_min)
-    fraccion = float((np.sign(triangulo["pendiente"]) == signo).mean()) if signo else 0.0
 
-    if mensual:
-        mk_anual = est.mann_kendall_sin_memoria(anios, anual.to_numpy())
-        cuarta = Prueba(
-            T("Agregación anual", "Annual aggregation"),
-            T("¿La tendencia se mantiene con un solo dato por año?", "Does the trend hold with a single value per year?"),
-            _mk_confirma(mk_anual, signo),
-            T(f"{valor_p(mk_anual.prueba.p)} con {len(anual)} años", f"{valor_p(mk_anual.prueba.p)} with {len(anual)} years"),
-            T("Se repite la prueba de Mann-Kendall sobre los promedios anuales: son menos datos, "
-            "pero sin ciclo estacional y casi sin autocorrelación. Una tendencia real debe "
-            "mantenerse.",
-              "The Mann-Kendall test is repeated on the annual means: fewer data points, but with no "
-              "seasonal cycle and almost no autocorrelation. A real trend should hold."),
-        )
-    else:
-        sobrevive, fallos = _sobrevive_sin_un_anio(anios, anual.to_numpy(), signo)
-        cuarta = Prueba(
-            T("Sensibilidad a un año", "Sensitivity to a single year"),
-            T("¿La tendencia se mantiene si se excluye cualquier año?", "Does the trend hold when any one year is left out?"),
-            sobrevive,
-            T("se mantiene al excluir cualquier año", "it holds when any year is left out") if sobrevive
-            else T("no es significativa, se excluya el año que se excluya",
-                   "it is not significant, whichever year is left out") if fallos == len(anual)
-            else T(f"deja de ser significativa al excluir {fallos} de {len(anual)} años",
-                   f"it stops being significant when leaving out {fallos} of {len(anual)} years"),
-            T("Se repite la prueba de Mann-Kendall excluyendo un año a la vez (validación "
-            "dejando uno fuera). Si la tendencia desaparece al excluir un solo año, dependía "
-            "de un valor atípico y no de un cambio sostenido.",
-              "The Mann-Kendall test is repeated leaving out one year at a time (leave-one-out "
-              "validation). If the trend disappears when a single year is removed, it depended on an "
-              "outlier and not on a sustained change."),
-        )
-
-    u = variable.unidad
-    pruebas = (
-        Prueba(
-            T("Prueba de Mann-Kendall", "Mann-Kendall test"),
-            T("¿Los valores aumentan (o disminuyen) con más frecuencia de la que explicaría el azar?", "Do the values increase (or decrease) more often than chance would explain?"),
-            _mk_confirma(mk, signo),
-            T(f"{valor_p(mk.prueba.p)} · pendiente de Theil-Sen: "
-            f"{numero(sen * 10, signo=True)} {u} por década",
-              f"{valor_p(mk.prueba.p)} · Theil-Sen slope: {numero(sen * 10, signo=True)} {u} per decade"),
-            T(f"Compara cada {dato} con todos los posteriores y cuenta cuántas veces el valor "
-            f"aumentó y cuántas disminuyó. Antes se corrige la autocorrelación de la serie "
-            f"(cada {dato} se parece al anterior) mediante preblanqueo, porque sin esa "
-            f"corrección la prueba detecta tendencias que no existen. La pendiente de "
-            f"Theil-Sen es la mediana de las pendientes entre todos los pares de datos y es "
-            f"robusta frente a valores atípicos.",
-              f"It compares each {dato} with all later ones and counts how many times the value went up "
-              f"and how many it went down. The autocorrelation of the series (each {dato} resembles the "
-              f"previous one) is corrected first by prewhitening, because without that correction the "
-              f"test detects trends that do not exist. The Theil-Sen slope is the median of the slopes "
-              f"between all pairs of data points and is robust to outliers."),
-        ),
-        Prueba(
-            T("Prueba t de la pendiente", "t-test of the slope"),
-            T("¿La pendiente de la regresión lineal es distinta de cero?", "Is the slope of the linear regression different from zero?"),
-            regresion.p < est.ALFA and np.sign(regresion.pendiente) == signo,
-            T(f"{valor_p(regresion.p)} · tamaño de muestra efectivo: {regresion.n_efectivo:.0f} "
-            f"de {regresion.n} {datos_txt}",
-              f"{valor_p(regresion.p)} · effective sample size: {regresion.n_efectivo:.0f} of {regresion.n} {datos_txt}"),
-            T(f"Ajusta una recta por mínimos cuadrados y evalúa si su pendiente podría ser cero. "
-            f"Como los {datos_txt} consecutivos están correlacionados, no cuentan como datos "
-            f"independientes: la prueba usa el tamaño de muestra efectivo.",
-              f"It fits a least-squares line and tests whether its slope could be zero. Because "
-              f"consecutive {datos_txt} are correlated, they do not count as independent data: the test "
-              f"uses the effective sample size."),
-        ),
-        Prueba(
-            T("Intervalo de confianza del 95 %", "95 % confidence interval"),
-            T("¿El intervalo de confianza de la pendiente excluye el cero?", "Does the confidence interval of the slope exclude zero?"),
-            (ic_historias[0] > 0 or ic_historias[1] < 0) and np.sign(ic_historias[0]) == signo,
-            T(f"de {numero(ic_historias[0] * 10, signo=True)} a "
-            f"{numero(ic_historias[1] * 10, signo=True)} {u} por década",
-              f"{numero(ic_historias[0] * 10, signo=True)} to {numero(ic_historias[1] * 10, signo=True)} {u} per decade"),
-            T("Se generan 2,000 series simuladas (bootstrap) con la misma variabilidad y la "
-            "misma autocorrelación que la serie real. Si el 95 % de sus pendientes queda del "
-            "mismo lado del cero, el signo de la tendencia es confiable.",
-              "2,000 simulated series (bootstrap) are generated with the same variability and the same "
-              "autocorrelation as the real series. If 95 % of their slopes fall on the same side of zero, "
-              "the sign of the trend is reliable."),
-        ),
-        cuarta,
-        Prueba(
-            T("Sensibilidad al periodo", "Sensitivity to the period"),
-            T("¿El signo de la tendencia se mantiene al cambiar el año inicial o final?", "Does the sign of the trend hold when the start or end year changes?"),
-            fraccion >= MIN_FRACCION_VENTANAS,
-            T(f"{100 * fraccion:.0f} % de {len(triangulo)} periodos conservan el signo",
-              f"{100 * fraccion:.0f} % of {len(triangulo)} periods keep the sign"),
-            T(f"Se recalcula la tendencia para todos los periodos posibles de al menos "
-            f"{largo_min} años. Si el signo depende de las fechas elegidas, el resultado es "
-            f"sensible a la selección del periodo. Se exige que al menos "
-            f"{100 * MIN_FRACCION_VENTANAS:.0f} % de los periodos coincida.",
-              f"The trend is recomputed for every possible period of at least {largo_min} years. If the "
-              f"sign depends on the chosen dates, the result is sensitive to the choice of period. At least "
-              f"{100 * MIN_FRACCION_VENTANAS:.0f} % of the periods must agree."),
-        ),
-    )
+    # Las cinco pruebas: cada una es un objeto que sabe evaluarse sobre la serie (ver pruebas.py).
+    analizada = SerieAnalizada(variable, mensual, t, y, anios, anual.to_numpy(), regresion, ic_historias, mk, sen,
+                               triangulo, largo_min)
+    pruebas = tuple(prueba.evaluar(analizada) for prueba in bateria(analizada))
+    fraccion = analizada.fraccion_de_periodos
 
     ruido = y - (regresion.intercepto + regresion.pendiente * t)
     necesarios = est.anios_para_detectar(regresion.pendiente, float(ruido.std(ddof=1)),
