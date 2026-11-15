@@ -10,6 +10,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from . import idioma
+from .variables_en import FRASES, PAREJAS_EN, VARIABLES_EN
+
+idioma.registrar(FRASES)
+# Campos de una variable que cambian con el idioma: los primeros tienen su texto en inglés por
+# variable (variables_en.VARIABLES_EN); los segundos son frases compartidas (variables_en.FRASES).
+_CAMPOS_PROPIOS = frozenset({"nombre", "definicion", "tecnica", "producto", "aviso"})
+_CAMPOS_COMUNES = frozenset({"unidad", "fuente", "resolucion"})
+
 
 @dataclass(frozen=True)
 class Referencia:
@@ -223,11 +232,21 @@ class Variable:
     origen: str = "power"
     tipo: str = ""  # vacío: se deduce del origen (ver la propiedad `clase`)
 
+    def __getattribute__(self, campo: str):
+        """Los campos de texto se entregan en el idioma de la sesión (el español es el que se guarda)."""
+        valor = object.__getattribute__(self, campo)
+        if idioma.en_ingles():
+            if campo in _CAMPOS_PROPIOS:
+                return VARIABLES_EN.get(object.__getattribute__(self, "codigo"), {}).get(campo, valor)
+            if campo in _CAMPOS_COMUNES:
+                return FRASES.get(valor, valor)
+        return valor
+
     @property
     def clase(self) -> str:
         """Qué clase de dato es: una observación, o el resultado de un modelo."""
-        return self.tipo or {"gee": "Observación satelital", "diario": "Índice anual de extremos"}.get(
-            self.origen, "Reanálisis o modelo")
+        return idioma.tr(self.tipo or {"gee": "Observación satelital", "diario": "Índice anual de extremos"}.get(
+            self.origen, "Reanálisis o modelo"))
 
     @property
     def anual(self) -> bool:
@@ -240,6 +259,8 @@ class Variable:
 
     @property
     def relevancia(self) -> str:
+        if idioma.en_ingles():
+            return VARIABLES_EN.get(self.codigo, {}).get("relevancia", RELEVANCIA[self.codigo])
         return RELEVANCIA[self.codigo]
 
 
@@ -695,3 +716,9 @@ _PAREJAS = (
                                 "elegido."),
 )
 PAREJAS: dict[str, tuple[str, str]] = {a: (b, nota) for a, b, nota in _PAREJAS} | {b: (a, nota) for a, b, nota in _PAREJAS}
+
+
+def independencia(codigo: str) -> str:
+    """Qué tan independientes son las dos fuentes de la pareja de `codigo`."""
+    otra, nota = PAREJAS[codigo]
+    return idioma.T(nota, PAREJAS_EN.get(codigo) or PAREJAS_EN.get(otra, nota))

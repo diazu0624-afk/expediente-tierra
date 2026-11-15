@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from . import estadistica as est
+from .idioma import Dicc, T, Tupla
 from .variables import CATALOGO, Variable
 
 MIN_ANIOS = 15
@@ -24,16 +25,19 @@ MIN_FRACCION_VENTANAS = 0.8
 MAX_REPETIDOS = 0.2
 N_PRUEBAS = 5
 
-NIVELES = {
-    "solida": "Evidencia sólida",
-    "fuerte": "Evidencia fuerte",
-    "indicios": "Evidencia débil",
-    "sin": "Sin evidencia suficiente",
-}
-NIVELES_CORTOS = {"solida": "Sólida", "fuerte": "Fuerte", "indicios": "Débil", "sin": "Insuficiente"}
+NIVELES = Dicc({
+    "solida": ("Evidencia sólida", "Solid evidence"),
+    "fuerte": ("Evidencia fuerte", "Strong evidence"),
+    "indicios": ("Evidencia débil", "Weak evidence"),
+    "sin": ("Sin evidencia suficiente", "Insufficient evidence"),
+})
+NIVELES_CORTOS = Dicc({"solida": ("Sólida", "Solid"), "fuerte": ("Fuerte", "Strong"), "indicios": ("Débil", "Weak"),
+                       "sin": ("Insuficiente", "Insufficient")})
 
-MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre",
-         "octubre", "noviembre", "diciembre")
+MESES = Tupla(("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre",
+               "octubre", "noviembre", "diciembre"),
+              ("January", "February", "March", "April", "May", "June", "July", "August", "September",
+               "October", "November", "December"))
 TODO_EL_ANIO = tuple(range(1, 13))
 # Estaciones meteorológicas, nombradas por sus meses para que sirvan en los dos hemisferios.
 TEMPORADAS: dict[str, tuple[int, ...]] = {
@@ -88,14 +92,15 @@ def ordenar_meses(meses) -> tuple[int, ...]:
 def nombre_de_meses(meses: tuple[int, ...]) -> str:
     """Cómo se nombra una selección de meses: "todo el año", "julio", "junio a agosto"."""
     if len(meses) == 12:
-        return "todo el año"
+        return T("todo el año", "the whole year")
     nombres = [MESES[m - 1] for m in meses]
     if len(meses) == 1:
         return nombres[0]
     seguidos = all((b - a) % 12 == 1 for a, b in zip(meses, meses[1:]))
+    y = T(" y ", " and ")
     if seguidos:
-        return f"{nombres[0]} a {nombres[-1]}" if len(meses) > 2 else f"{nombres[0]} y {nombres[1]}"
-    return ", ".join(nombres[:-1]) + " y " + nombres[-1]
+        return f"{nombres[0]}{T(' a ', ' to ')}{nombres[-1]}" if len(meses) > 2 else f"{nombres[0]}{y}{nombres[1]}"
+    return ", ".join(nombres[:-1]) + y + nombres[-1]
 
 
 def serie_de_temporada(serie: pd.Series, meses: tuple[int, ...]) -> pd.Series:
@@ -125,7 +130,8 @@ def serie_anual(serie: pd.Series, meses: tuple[int, ...] = TODO_EL_ANIO, ya_es_a
     return promedios_anuales(serie) if len(meses) == 12 else serie_de_temporada(serie, meses)
 
 
-SOLO_ANUAL = "Es un índice anual: no se calcula por temporada"
+def _solo_anual() -> str:
+    return T("Es un índice anual: no se calcula por temporada", "It is an annual index: it is not computed by season")
 
 
 def _parte_repetida(serie: pd.Series) -> float:
@@ -135,9 +141,10 @@ def _parte_repetida(serie: pd.Series) -> float:
 
 def _motivo_imposible(anual: pd.Series) -> str:
     if len(anual) < MIN_ANIOS:
-        return f"Hay menos de {MIN_ANIOS} años de datos aquí"
+        return T(f"Hay menos de {MIN_ANIOS} años de datos aquí", f"There are fewer than {MIN_ANIOS} years of data here")
     if _parte_repetida(anual) > MAX_REPETIDOS:
-        return "Casi nunca ocurre o casi nunca cambia en este lugar"
+        return T("Casi nunca ocurre o casi nunca cambia en este lugar",
+                 "It almost never occurs or almost never changes at this location")
     return ""
 
 
@@ -187,10 +194,12 @@ class Interrogatorio:
     @property
     def muestra(self) -> str:
         """El tamaño de muestra en palabras, para mostrarlo junto a cada resultado."""
-        periodo = f"de {self.anual.index.min()} a {self.anual.index.max()}"
+        inicio, fin = self.anual.index.min(), self.anual.index.max()
+        periodo = T(f"de {inicio} a {fin}", f"{inicio} to {fin}")
         if self.resolucion == "mensual":
-            return f"n = {self.n} meses ({len(self.anual)} años completos), {periodo}"
-        return f"n = {self.n} años, {periodo}"
+            return T(f"n = {self.n} meses ({len(self.anual)} años completos), {periodo}",
+                     f"n = {self.n} months ({len(self.anual)} complete years), {periodo}")
+        return T(f"n = {self.n} años, {periodo}", f"n = {self.n} years, {periodo}")
 
     @property
     def aprobadas(self) -> int:
@@ -270,7 +279,8 @@ def interrogar(serie_mensual: pd.Series, variable: Variable,
     serie = serie_mensual.loc[str(variable.desde):].dropna()
     por_temporada = len(meses) < 12
     if por_temporada and variable.anual:
-        raise CasoImposible(SOLO_ANUAL + ". Elige «Todo el año» en la barra lateral.")
+        raise CasoImposible(_solo_anual() + T(". Elige «Todo el año» en la barra lateral.",
+                                              ". Choose “The whole year” in the sidebar."))
     if por_temporada:
         serie = serie[serie.index.month.isin(meses)]
     anual = serie_anual(serie, meses, variable.anual)
@@ -286,10 +296,10 @@ def interrogar(serie_mensual: pd.Series, variable: Variable,
     if mensual:
         t = np.asarray(anomalias.index.year + (anomalias.index.month - 0.5) / 12, dtype=float)
         y = anomalias.to_numpy()
-        dato, datos_txt = "mes", "meses"
+        dato, datos_txt = T("mes", "month"), T("meses", "months")
     else:
         t, y = anios, anual.to_numpy()
-        dato, datos_txt = "año", "años"
+        dato, datos_txt = T("año", "year"), T("años", "years")
 
     regresion = est.regresion_lineal(t, y)
     ic_historias = est.ic_historias_alternativas(t, y)
@@ -304,73 +314,98 @@ def interrogar(serie_mensual: pd.Series, variable: Variable,
     if mensual:
         mk_anual = est.mann_kendall_sin_memoria(anios, anual.to_numpy())
         cuarta = Prueba(
-            "Agregación anual",
-            "¿La tendencia se mantiene con un solo dato por año?",
+            T("Agregación anual", "Annual aggregation"),
+            T("¿La tendencia se mantiene con un solo dato por año?", "Does the trend hold with a single value per year?"),
             _mk_confirma(mk_anual, signo),
-            f"{valor_p(mk_anual.prueba.p)} con {len(anual)} años",
-            "Se repite la prueba de Mann-Kendall sobre los promedios anuales: son menos datos, "
+            T(f"{valor_p(mk_anual.prueba.p)} con {len(anual)} años", f"{valor_p(mk_anual.prueba.p)} with {len(anual)} years"),
+            T("Se repite la prueba de Mann-Kendall sobre los promedios anuales: son menos datos, "
             "pero sin ciclo estacional y casi sin autocorrelación. Una tendencia real debe "
             "mantenerse.",
+              "The Mann-Kendall test is repeated on the annual means: fewer data points, but with no "
+              "seasonal cycle and almost no autocorrelation. A real trend should hold."),
         )
     else:
         sobrevive, fallos = _sobrevive_sin_un_anio(anios, anual.to_numpy(), signo)
         cuarta = Prueba(
-            "Sensibilidad a un año",
-            "¿La tendencia se mantiene si se excluye cualquier año?",
+            T("Sensibilidad a un año", "Sensitivity to a single year"),
+            T("¿La tendencia se mantiene si se excluye cualquier año?", "Does the trend hold when any one year is left out?"),
             sobrevive,
-            "se mantiene al excluir cualquier año" if sobrevive
-            else "no es significativa, se excluya el año que se excluya" if fallos == len(anual)
-            else f"deja de ser significativa al excluir {fallos} de {len(anual)} años",
-            "Se repite la prueba de Mann-Kendall excluyendo un año a la vez (validación "
+            T("se mantiene al excluir cualquier año", "it holds when any year is left out") if sobrevive
+            else T("no es significativa, se excluya el año que se excluya",
+                   "it is not significant, whichever year is left out") if fallos == len(anual)
+            else T(f"deja de ser significativa al excluir {fallos} de {len(anual)} años",
+                   f"it stops being significant when leaving out {fallos} of {len(anual)} years"),
+            T("Se repite la prueba de Mann-Kendall excluyendo un año a la vez (validación "
             "dejando uno fuera). Si la tendencia desaparece al excluir un solo año, dependía "
             "de un valor atípico y no de un cambio sostenido.",
+              "The Mann-Kendall test is repeated leaving out one year at a time (leave-one-out "
+              "validation). If the trend disappears when a single year is removed, it depended on an "
+              "outlier and not on a sustained change."),
         )
 
     u = variable.unidad
     pruebas = (
         Prueba(
-            "Prueba de Mann-Kendall",
-            "¿Los valores aumentan (o disminuyen) con más frecuencia de la que explicaría el azar?",
+            T("Prueba de Mann-Kendall", "Mann-Kendall test"),
+            T("¿Los valores aumentan (o disminuyen) con más frecuencia de la que explicaría el azar?", "Do the values increase (or decrease) more often than chance would explain?"),
             _mk_confirma(mk, signo),
-            f"{valor_p(mk.prueba.p)} · pendiente de Theil-Sen: "
+            T(f"{valor_p(mk.prueba.p)} · pendiente de Theil-Sen: "
             f"{numero(sen * 10, signo=True)} {u} por década",
-            f"Compara cada {dato} con todos los posteriores y cuenta cuántas veces el valor "
+              f"{valor_p(mk.prueba.p)} · Theil-Sen slope: {numero(sen * 10, signo=True)} {u} per decade"),
+            T(f"Compara cada {dato} con todos los posteriores y cuenta cuántas veces el valor "
             f"aumentó y cuántas disminuyó. Antes se corrige la autocorrelación de la serie "
             f"(cada {dato} se parece al anterior) mediante preblanqueo, porque sin esa "
             f"corrección la prueba detecta tendencias que no existen. La pendiente de "
             f"Theil-Sen es la mediana de las pendientes entre todos los pares de datos y es "
             f"robusta frente a valores atípicos.",
+              f"It compares each {dato} with all later ones and counts how many times the value went up "
+              f"and how many it went down. The autocorrelation of the series (each {dato} resembles the "
+              f"previous one) is corrected first by prewhitening, because without that correction the "
+              f"test detects trends that do not exist. The Theil-Sen slope is the median of the slopes "
+              f"between all pairs of data points and is robust to outliers."),
         ),
         Prueba(
-            "Prueba t de la pendiente",
-            "¿La pendiente de la regresión lineal es distinta de cero?",
+            T("Prueba t de la pendiente", "t-test of the slope"),
+            T("¿La pendiente de la regresión lineal es distinta de cero?", "Is the slope of the linear regression different from zero?"),
             regresion.p < est.ALFA and np.sign(regresion.pendiente) == signo,
-            f"{valor_p(regresion.p)} · tamaño de muestra efectivo: {regresion.n_efectivo:.0f} "
+            T(f"{valor_p(regresion.p)} · tamaño de muestra efectivo: {regresion.n_efectivo:.0f} "
             f"de {regresion.n} {datos_txt}",
-            f"Ajusta una recta por mínimos cuadrados y evalúa si su pendiente podría ser cero. "
+              f"{valor_p(regresion.p)} · effective sample size: {regresion.n_efectivo:.0f} of {regresion.n} {datos_txt}"),
+            T(f"Ajusta una recta por mínimos cuadrados y evalúa si su pendiente podría ser cero. "
             f"Como los {datos_txt} consecutivos están correlacionados, no cuentan como datos "
             f"independientes: la prueba usa el tamaño de muestra efectivo.",
+              f"It fits a least-squares line and tests whether its slope could be zero. Because "
+              f"consecutive {datos_txt} are correlated, they do not count as independent data: the test "
+              f"uses the effective sample size."),
         ),
         Prueba(
-            "Intervalo de confianza del 95 %",
-            "¿El intervalo de confianza de la pendiente excluye el cero?",
+            T("Intervalo de confianza del 95 %", "95 % confidence interval"),
+            T("¿El intervalo de confianza de la pendiente excluye el cero?", "Does the confidence interval of the slope exclude zero?"),
             (ic_historias[0] > 0 or ic_historias[1] < 0) and np.sign(ic_historias[0]) == signo,
-            f"de {numero(ic_historias[0] * 10, signo=True)} a "
+            T(f"de {numero(ic_historias[0] * 10, signo=True)} a "
             f"{numero(ic_historias[1] * 10, signo=True)} {u} por década",
-            "Se generan 2,000 series simuladas (bootstrap) con la misma variabilidad y la "
+              f"{numero(ic_historias[0] * 10, signo=True)} to {numero(ic_historias[1] * 10, signo=True)} {u} per decade"),
+            T("Se generan 2,000 series simuladas (bootstrap) con la misma variabilidad y la "
             "misma autocorrelación que la serie real. Si el 95 % de sus pendientes queda del "
             "mismo lado del cero, el signo de la tendencia es confiable.",
+              "2,000 simulated series (bootstrap) are generated with the same variability and the same "
+              "autocorrelation as the real series. If 95 % of their slopes fall on the same side of zero, "
+              "the sign of the trend is reliable."),
         ),
         cuarta,
         Prueba(
-            "Sensibilidad al periodo",
-            "¿El signo de la tendencia se mantiene al cambiar el año inicial o final?",
+            T("Sensibilidad al periodo", "Sensitivity to the period"),
+            T("¿El signo de la tendencia se mantiene al cambiar el año inicial o final?", "Does the sign of the trend hold when the start or end year changes?"),
             fraccion >= MIN_FRACCION_VENTANAS,
-            f"{100 * fraccion:.0f} % de {len(triangulo)} periodos conservan el signo",
-            f"Se recalcula la tendencia para todos los periodos posibles de al menos "
+            T(f"{100 * fraccion:.0f} % de {len(triangulo)} periodos conservan el signo",
+              f"{100 * fraccion:.0f} % of {len(triangulo)} periods keep the sign"),
+            T(f"Se recalcula la tendencia para todos los periodos posibles de al menos "
             f"{largo_min} años. Si el signo depende de las fechas elegidas, el resultado es "
             f"sensible a la selección del periodo. Se exige que al menos "
             f"{100 * MIN_FRACCION_VENTANAS:.0f} % de los periodos coincida.",
+              f"The trend is recomputed for every possible period of at least {largo_min} years. If the "
+              f"sign depends on the chosen dates, the result is sensitive to the choice of period. At least "
+              f"{100 * MIN_FRACCION_VENTANAS:.0f} % of the periods must agree."),
         ),
     )
 
@@ -447,7 +482,8 @@ def relacionar(a: Interrogatorio, b: Interrogatorio) -> Relacion:
         t = juntas.index.to_numpy(dtype=float)
         resolucion = "anual"
     if len(juntas) < MIN_ANIOS:
-        raise CasoImposible("Las dos variables comparten muy pocos datos para relacionarlas.")
+        raise CasoImposible(T("Las dos variables comparten muy pocos datos para relacionarlas.",
+                              "The two variables share too few data points to relate them."))
     def estandar(x: np.ndarray) -> np.ndarray:
         sin_tendencia = x - np.polyval(np.polyfit(t, x, 1), t)
         return sin_tendencia / (sin_tendencia.std(ddof=1) or 1.0)
@@ -475,7 +511,7 @@ def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO,
         else:
             anual = pd.Series(dtype=float)
         fila["anios"] = len(anual)
-        fila["nota"] = SOLO_ANUAL if v.anual and len(meses) < 12 else _motivo_imposible(anual)
+        fila["nota"] = _solo_anual() if v.anual and len(meses) < 12 else _motivo_imposible(anual)
         if not fila["nota"]:
             anios, valores = anual.index.to_numpy(dtype=float), anual.to_numpy()
             recta = est.regresion_lineal(anios, valores)

@@ -10,6 +10,21 @@ from . import estadistica as est
 import textwrap
 
 from .caso import MESES, Interrogatorio, numero, valor_p
+from .idioma import T
+
+
+def _por_decada() -> str:
+    return T("por década", "per decade")
+
+
+def _grupos() -> list[tuple[str, bool, bool, str]]:
+    """Las cuatro clases de barra: signo de la tendencia y si es significativa."""
+    return [
+        (T("Positiva · significativa", "Positive · significant"), True, True, ROJO),
+        (T("Positiva · no significativa", "Positive · not significant"), True, False, ROJO_CLARO),
+        (T("Negativa · significativa", "Negative · significant"), False, True, AZUL),
+        (T("Negativa · no significativa", "Negative · not significant"), False, False, AZUL_CLARO),
+    ]
 
 FRACCION_LOESS = 0.5  # parte de los datos que entra a cada regresión local de la curva suavizada
 from .variables import POR_CODIGO
@@ -62,19 +77,16 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
     datos = datos.assign(etiqueta=[f"{f.nombre}  <span style='color:{TENUE}'>n = {f.anios}</span>"
                                    for f in datos.itertuples()])
     fig = go.Figure()
-    grupos = [
-        ("Positiva · significativa", True, True, ROJO),
-        ("Positiva · no significativa", True, False, ROJO_CLARO),
-        ("Negativa · significativa", False, True, AZUL),
-        ("Negativa · no significativa", False, False, AZUL_CLARO),
-    ]
+    grupos = _grupos()
     for nombre, sube, significativa, color in grupos:
         g = datos[((datos["estandarizada"] > 0) == sube) & (datos["significativa"] == significativa)]
         detalle = [
             "<i>" + "<br>".join(textwrap.wrap(POR_CODIGO[f.codigo].definicion, 62)) + "</i><br><br>"
-            f"{numero(f.pendiente_decada, signo=True)} {f.unidad} por década<br>"
-            f"Tamaño de muestra: n = {f.anios} años<br>"
-            f"{valor_p(f.p_ajustada)} (ajustado por comparar {len(datos)} variables)"
+            f"{numero(f.pendiente_decada, signo=True)} {f.unidad} {_por_decada()}<br>"
+            + T(f"Tamaño de muestra: n = {f.anios} años<br>"
+                f"{valor_p(f.p_ajustada)} (ajustado por comparar {len(datos)} variables)",
+                f"Sample size: n = {f.anios} years<br>"
+                f"{valor_p(f.p_ajustada)} (adjusted for comparing {len(datos)} variables)")
             for f in g.itertuples()
         ]
         fig.add_bar(
@@ -83,14 +95,16 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
             text=[f"{x:+.2f}" for x in g["estandarizada"]] if significativa else None,
             textposition="outside", textfont=dict(color=TINTA_2, size=11, family=FUENTE_CIFRAS), cliponaxis=False,
             customdata=np.column_stack([g["nombre"], detalle]) if len(g) else None,
-            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Tendencia estandarizada: %{x:+.2f}<extra></extra>",
+            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>" + T("Tendencia estandarizada", "Standardised trend")
+                          + ": %{x:+.2f}<extra></extra>",
         )
     tope = float(datos["estandarizada"].abs().max()) * 1.18 if len(datos) else 1.0
     _base(fig, alto=26 * len(datos) + 110)
     fig.update_layout(barmode="overlay", legend_traceorder="normal")
     fig.update_xaxes(
         range=[-tope, tope], zeroline=True, zerolinecolor=EJE, zerolinewidth=1, showline=False,
-        title_text="Tendencia estandarizada (desviaciones estándar interanuales por década)",
+        title_text=T("Tendencia estandarizada (desviaciones estándar interanuales por década)",
+                         "Standardised trend (interannual standard deviations per decade)"),
     )
     fig.update_yaxes(showgrid=False, categoryorder="array", categoryarray=list(datos["etiqueta"]),
                      tickfont=dict(color=TINTA_2, family=FUENTE, size=12.5), ticks="")
@@ -133,35 +147,36 @@ def tendencia(r: Interrogatorio) -> go.Figure:
                     hoverinfo="skip", showlegend=False)
     fig.add_scatter(x=x, y=np.maximum(borde_a, borde_b), mode="lines", line=dict(width=0),
                     fill="tonexty", fillcolor="rgba(11,11,11,0.10)", hoverinfo="skip",
-                    name="Intervalo de confianza del 95 %", legendrank=4)
+                    name=T("Intervalo de confianza del 95 %", "95 % confidence interval"), legendrank=4)
     if mensual:
-        fig.add_scatter(x=x, y=r.anomalias, mode="lines", name="Anomalía mensual", legendrank=1,
+        fig.add_scatter(x=x, y=r.anomalias, mode="lines", name=T("Anomalía mensual", "Monthly anomaly"), legendrank=1,
                         line=dict(color=EJE, width=1),
                         hovertemplate="%{x|%b %Y}: %{y:+.2f} " + u + "<extra></extra>")
         suave = r.anomalias.rolling(12, center=True).mean()
-        fig.add_scatter(x=x, y=suave, mode="lines", name="Media móvil de 12 meses", legendrank=2,
+        fig.add_scatter(x=x, y=suave, mode="lines", name=T("Media móvil de 12 meses", "12-month moving average"), legendrank=2,
                         line=dict(color=AZUL, width=2),
-                        hovertemplate="12 meses alrededor de %{x|%b %Y}: %{y:+.2f} " + u + "<extra></extra>")
+                        hovertemplate=T("12 meses alrededor de", "12 months around") + " %{x|%b %Y}: %{y:+.2f} " + u + "<extra></extra>")
     else:
         fig.add_scatter(x=x, y=r.anual, mode="lines+markers", legendrank=2,
-                        name=(f"Promedio de {r.temporada}" if r.por_temporada
-                              else "Valor de cada año" if r.variable.anual else "Promedio anual"),
+                        name=(T(f"Promedio de {r.temporada}", f"{r.temporada} mean") if r.por_temporada
+                              else T("Valor de cada año", "Value of each year") if r.variable.anual
+                              else T("Promedio anual", "Annual mean")),
                         line=dict(color=AZUL, width=2),
                         marker=dict(size=8, color=AZUL, line=dict(color=SUPERFICIE, width=2)),
                         hovertemplate="%{x}: %{y:.2f} " + u + "<extra></extra>")
-    fig.add_scatter(x=x, y=recta, mode="lines", name="Tendencia lineal", legendrank=3,
+    fig.add_scatter(x=x, y=recta, mode="lines", name=T("Tendencia lineal", "Linear trend"), legendrank=3,
                     line=dict(color=TINTA, width=2), hoverinfo="skip")
     fig.add_scatter(x=x, y=est.loess(r.t, r.y, FRACCION_LOESS), mode="lines", legendrank=5,
-                    name="Curva suavizada (LOESS)", line=dict(color=TINTA, width=1.6, dash="dot"),
-                    hovertemplate="Curva suavizada: %{y:+.2f} " + u + "<extra></extra>")
+                    name=T("Curva suavizada (LOESS)", "Smoothed curve (LOESS)"), line=dict(color=TINTA, width=1.6, dash="dot"),
+                    hovertemplate=T("Curva suavizada", "Smoothed curve") + ": %{y:+.2f} " + u + "<extra></extra>")
 
     _base(fig, alto=380)
     fig.update_layout(legend_traceorder="normal")
     if mensual:
         fig.add_hline(y=0, line_color=EJE, line_width=1)
-        fig.update_yaxes(title_text=f"Anomalía respecto a la climatología ({u})")
+        fig.update_yaxes(title_text=T(f"Anomalía respecto a la climatología ({u})", f"Anomaly relative to climatology ({u})"))
     else:
-        fig.update_yaxes(title_text=f"Promedio de {r.temporada} ({u})" if r.por_temporada else u)
+        fig.update_yaxes(title_text=T(f"Promedio de {r.temporada} ({u})", f"{r.temporada} mean ({u})") if r.por_temporada else u)
     return fig
 
 
@@ -169,16 +184,13 @@ def por_mes(tabla: pd.DataFrame, unidad: str) -> go.Figure:
     """Tendencia de cada mes del año por separado, con su intervalo de confianza del 95 %."""
     datos = tabla.dropna(subset=["pendiente_decada"])
     fig = go.Figure()
-    grupos = [
-        ("Positiva · significativa", True, True, ROJO),
-        ("Positiva · no significativa", True, False, ROJO_CLARO),
-        ("Negativa · significativa", False, True, AZUL),
-        ("Negativa · no significativa", False, False, AZUL_CLARO),
-    ]
+    grupos = _grupos()
     for nombre, sube, significativa, color in grupos:
         g = datos[((datos["pendiente_decada"] > 0) == sube) & (datos["significativa"] == significativa)]
-        detalle = [f"IC 95 %: de {numero(f.ic_bajo, signo=True)} a {numero(f.ic_alto, signo=True)}<br>"
-                   f"{valor_p(f.p_ajustada)} (ajustado por comparar 12 meses)<br>n = {f.n} años"
+        detalle = [T(f"IC 95 %: de {numero(f.ic_bajo, signo=True)} a {numero(f.ic_alto, signo=True)}<br>"
+                     f"{valor_p(f.p_ajustada)} (ajustado por comparar 12 meses)<br>n = {f.n} años",
+                     f"95 % CI: {numero(f.ic_bajo, signo=True)} to {numero(f.ic_alto, signo=True)}<br>"
+                     f"{valor_p(f.p_ajustada)} (adjusted for comparing 12 months)<br>n = {f.n} years")
                    for f in g.itertuples()]
         fig.add_bar(
             name=nombre, x=g["mes"], y=g["pendiente_decada"], width=0.62,
@@ -186,14 +198,14 @@ def por_mes(tabla: pd.DataFrame, unidad: str) -> go.Figure:
             error_y=dict(type="data", symmetric=False, array=g["ic_alto"] - g["pendiente_decada"],
                          arrayminus=g["pendiente_decada"] - g["ic_bajo"], color=TINTA_2, thickness=1.2, width=4),
             customdata=np.column_stack([[MESES[m - 1].capitalize() for m in g["mes"]], detalle]) if len(g) else None,
-            hovertemplate="<b>%{customdata[0]}</b>: %{y:+.3g} " + unidad + " por década<br>%{customdata[1]}<extra></extra>",
+            hovertemplate="<b>%{customdata[0]}</b>: %{y:+.3g} " + unidad + " " + _por_decada() + "<br>%{customdata[1]}<extra></extra>",
         )
     _base(fig, alto=340)
     fig.update_layout(barmode="overlay", legend_traceorder="normal")
     fig.add_hline(y=0, line_color=EJE, line_width=1)
     fig.update_xaxes(tickmode="array", tickvals=list(range(1, 13)), range=[0.4, 12.6], ticks="",
                      ticktext=[m[:3] for m in MESES], tickfont=dict(family=FUENTE, size=12.5, color=TINTA_2))
-    fig.update_yaxes(title_text=f"Tendencia ({unidad} por década)")
+    fig.update_yaxes(title_text=T(f"Tendencia ({unidad} por década)", f"Trend ({unidad} per decade)"))
     return fig
 
 
@@ -204,24 +216,24 @@ def triangulo(r: Interrogatorio) -> go.Figure:
     z = tri.pivot(index="fin", columns="inicio", values="decada")
     p = tri.pivot(index="fin", columns="inicio", values="p")
     tope = float(np.nanmax(np.abs(z.to_numpy()))) or 1.0
-    texto = np.where(p.to_numpy() < est.ALFA, "significativa", "no significativa")
+    texto = np.where(p.to_numpy() < est.ALFA, T("significativa", "significant"), T("no significativa", "not significant"))
 
     fig = go.Figure()
     fig.add_heatmap(
         z=z.to_numpy(), x=z.columns, y=z.index, colorscale=DIVERGENTE, zmin=-tope, zmax=tope,
         xgap=1, ygap=1, customdata=texto, hoverongaps=False,
-        colorbar=dict(title=dict(text=f"{u}<br>por década", font=dict(color=TINTA_2)),
+        colorbar=dict(title=dict(text=f"{u}<br>{_por_decada()}", font=dict(color=TINTA_2)),
                       thickness=12, outlinewidth=0, tickfont=dict(color=TENUE)),
-        hovertemplate="De %{x} a %{y}: %{z:+.3g} " + u + " por década<br>%{customdata}<extra></extra>",
+        hovertemplate=T("De %{x} a %{y}", "%{x} to %{y}") + ": %{z:+.3g} " + u + " " + _por_decada() + "<br>%{customdata}<extra></extra>",
     )
     firmes = tri[tri["p"] < est.ALFA]
     fig.add_scatter(x=firmes["inicio"], y=firmes["fin"], mode="markers", hoverinfo="skip",
                     marker=dict(size=3, color=TINTA, opacity=0.55),
-                    name="Periodo con tendencia significativa (p < 0.05)")
+                    name=T("Periodo con tendencia significativa (p < 0.05)", "Period with a significant trend (p < 0.05)"))
     _base(fig, alto=440)
     fig.update_layout(showlegend=True)
-    fig.update_xaxes(title_text="Año inicial del periodo", ticks="", showline=False)
-    fig.update_yaxes(title_text="Año final del periodo", showgrid=False)
+    fig.update_xaxes(title_text=T("Año inicial del periodo", "Start year of the period"), ticks="", showline=False)
+    fig.update_yaxes(title_text=T("Año final del periodo", "End year of the period"), showgrid=False)
     return fig
 
 
@@ -245,7 +257,7 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float | None = None, lugar
             [f.lon - ancho_celda / 2, f.lat - alto_celda / 2]]]},
     } for i, f in enumerate(tabla.itertuples())]
     tope = tope or float(tabla["pendiente_decada"].abs().max()) or 1.0
-    estado = np.where(tabla["significativa"], "significativa", "no significativa")
+    estado = np.where(tabla["significativa"], T("significativa", "significant"), T("no significativa", "not significant"))
     estado = np.column_stack([estado, tabla["anios"] if "anios" in tabla else np.full(len(tabla), "—")])
 
     fig = go.Figure()
@@ -253,24 +265,25 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float | None = None, lugar
         geojson={"type": "FeatureCollection", "features": celdas}, locations=list(range(len(tabla))),
         z=tabla["pendiente_decada"], colorscale=DIVERGENTE, zmin=-tope, zmax=tope,
         marker=dict(opacity=0.78, line=dict(width=0.5, color=SUPERFICIE)), customdata=estado,
-        colorbar=dict(title=dict(text=f"{unidad}<br>por década", font=dict(color=TINTA_2)),
+        colorbar=dict(title=dict(text=f"{unidad}<br>{_por_decada()}", font=dict(color=TINTA_2)),
                       thickness=12, outlinewidth=0, tickfont=dict(color=TENUE)),
-        hovertemplate="%{z:+.3g} " + unidad + " por década<br>%{customdata[0]}<br>n = %{customdata[1]} años<extra></extra>",
+        hovertemplate="%{z:+.3g} " + unidad + " " + _por_decada() + "<br>%{customdata[0]}<br>n = %{customdata[1]} "
+                      + T("años", "years") + "<extra></extra>",
     )
     firmes = tabla[tabla["significativa"]]
     fig.add_scattermap(lat=firmes["lat"], lon=firmes["lon"], mode="markers", hoverinfo="skip",
                        marker=dict(size=4 if len(tabla) < 1500 else 3, color=TINTA, opacity=0.6),
-                       name="Celda con tendencia significativa")
+                       name=T("Celda con tendencia significativa", "Cell with a significant trend"))
     if lugar_lat is not None:  # los mapas de un país o del mundo no tienen sitio de estudio
         fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
                            marker=dict(size=14, color=SUPERFICIE), showlegend=False)
         fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
-                           marker=dict(size=9, color=TINTA), name="Sitio de estudio")
+                           marker=dict(size=9, color=TINTA), name=T("Sitio de estudio", "Study site"))
     if celda is not None:
         for tamano, color, visible in ((22, TINTA, True), (16, SUPERFICIE, False)):
             fig.add_scattermap(lat=[celda[0]], lon=[celda[1]], mode="markers", hoverinfo="skip",
                                marker=dict(size=tamano, color=color, opacity=1 if visible else 0.85),
-                               name="Celda analizada", showlegend=visible)
+                               name=T("Celda analizada", "Cell analysed"), showlegend=visible)
     _base(fig, alto=480)
     # Acercamiento para que el recuadro completo quepa a lo alto (el mapa se estira hacia los polos).
     alto_grados = (lats.max() - lats.min() + alto_celda) / np.cos(np.radians(float(lats.mean())))
@@ -287,7 +300,8 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float | None = None, lugar
 
 def laboratorio(clasica: float, corregida: float, prueba_t: float, con_tendencia: bool) -> go.Figure:
     """Porcentaje de series que cada prueba declara con tendencia significativa."""
-    nombres = ["Mann-Kendall clásica", "Mann-Kendall con preblanqueo", "Prueba t con muestra efectiva"]
+    nombres = [T("Mann-Kendall clásica", "Classic Mann-Kendall"), T("Mann-Kendall con preblanqueo", "Mann-Kendall with prewhitening"),
+               T("Prueba t con muestra efectiva", "t-test with effective sample")]
     valores = [clasica, corregida, prueba_t]
     fig = go.Figure()
     fig.add_bar(x=valores, y=nombres, orientation="h", width=0.55,
@@ -298,10 +312,10 @@ def laboratorio(clasica: float, corregida: float, prueba_t: float, con_tendencia
     fig.update_layout(showlegend=False, margin_t=28)
     if not con_tendencia:
         fig.add_vline(x=100 * est.ALFA, line_color=TINTA, line_width=1.2, line_dash="dot",
-                      annotation_text="5 % esperado", annotation_position="top",
+                      annotation_text=T("5 % esperado", "5 % expected"), annotation_position="top",
                       annotation_font=dict(color=TINTA_2, size=11, family=FUENTE))
     fig.update_xaxes(range=[0, max(max(valores) * 1.2, 12)], ticksuffix=" %",
-                     title_text="Series declaradas con tendencia significativa")
+                     title_text=T("Series declaradas con tendencia significativa", "Series declared to have a significant trend"))
     fig.update_yaxes(showgrid=False, autorange="reversed", ticks="",
                      tickfont=dict(color=TINTA_2, family=FUENTE, size=12.5))
     return fig
@@ -310,18 +324,18 @@ def laboratorio(clasica: float, corregida: float, prueba_t: float, con_tendencia
 def serie_simulada(t: np.ndarray, y: np.ndarray) -> go.Figure:
     """Una serie del laboratorio con la recta que la prueba clásica toma por tendencia."""
     fig = go.Figure()
-    fig.add_scatter(x=t, y=y, mode="lines", line=dict(color=EJE, width=1), name="Serie simulada (mensual)",
+    fig.add_scatter(x=t, y=y, mode="lines", line=dict(color=EJE, width=1), name=T("Serie simulada (mensual)", "Simulated series (monthly)"),
                     hoverinfo="skip")
     suave = pd.Series(y).rolling(12, center=True).mean()
-    fig.add_scatter(x=t, y=suave, mode="lines", line=dict(color=AZUL, width=2), name="Media móvil de 12 meses",
+    fig.add_scatter(x=t, y=suave, mode="lines", line=dict(color=AZUL, width=2), name=T("Media móvil de 12 meses", "12-month moving average"),
                     hoverinfo="skip")
     recta = np.polyval(np.polyfit(t, y, 1), t)
-    fig.add_scatter(x=t, y=recta, mode="lines", line=dict(color=TINTA, width=2), name="Recta ajustada",
+    fig.add_scatter(x=t, y=recta, mode="lines", line=dict(color=TINTA, width=2), name=T("Recta ajustada", "Fitted line"),
                     hoverinfo="skip")
     _base(fig, alto=300)
     fig.update_layout(legend_traceorder="normal")
-    fig.update_xaxes(title_text="Años")
-    fig.update_yaxes(title_text="Desviaciones estándar")
+    fig.update_xaxes(title_text=T("Años", "Years"))
+    fig.update_yaxes(title_text=T("Desviaciones estándar", "Standard deviations"))
     return fig
 
 
@@ -338,7 +352,7 @@ def relacion(fechas: pd.Index, a: np.ndarray, b: np.ndarray, nombre_a: str, nomb
     _base(fig, alto=340)
     fig.add_hline(y=0, line_color=EJE, line_width=1)
     fig.update_layout(legend_traceorder="normal")
-    fig.update_yaxes(title_text="Anomalía estandarizada (desviaciones estándar)")
+    fig.update_yaxes(title_text=T("Anomalía estandarizada (desviaciones estándar)", "Standardised anomaly (standard deviations)"))
     return fig
 
 
@@ -364,10 +378,10 @@ def comparacion(a: Interrogatorio, b: Interrogatorio, nombre_a: str, nombre_b: s
         fig.add_scatter(x=fechas, y=recta, mode="lines", legendgroup=nombre, showlegend=False,
                         line=dict(color=color, width=2.5), hoverinfo="skip")
         fig.add_annotation(x=fechas[-1], y=float(recta[-1]), xanchor="left", xshift=8, showarrow=False,
-                           text=f"{numero(r.pendiente_decada, signo=True)}<br>por década",
+                           text=f"{numero(r.pendiente_decada, signo=True)}<br>{_por_decada()}",
                            font=dict(color=TINTA_2, size=11, family=FUENTE_CIFRAS), align="left")
     _base(fig, alto=400)
     fig.add_hline(y=0, line_color=EJE, line_width=1)
     fig.update_layout(margin_r=90, legend_traceorder="normal")
-    fig.update_yaxes(title_text=f"Anomalía respecto a la climatología de cada lugar ({u})")
+    fig.update_yaxes(title_text=T(f"Anomalía respecto a la climatología de cada lugar ({u})", f"Anomaly relative to each place's climatology ({u})"))
     return fig

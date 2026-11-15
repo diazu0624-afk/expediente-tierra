@@ -1,8 +1,14 @@
 # Expediente Tierra
 
 Herramienta para el reto "Be an Earth System Trend Detective!" del NASA Space Apps Challenge
-2026, del equipo C15H25N3O. El usuario elige un lugar del planeta y la app responde qué
-variable está cambiando ahí, dónde, cuánto, y si el cambio es estadísticamente significativo.
+2026, del equipo C15H25N3O. El usuario elige un lugar del planeta, un país o el mundo entero, y
+la app responde qué variable está cambiando ahí, dónde, cuánto, en qué meses del año, y si el
+cambio es estadísticamente significativo.
+
+**En cifras:** 46 variables de tierra, atmósfera y océano (26 de reanálisis vía NASA POWER, 12
+de satélites y modelos vía Google Earth Engine y 8 índices de extremos con datos diarios); 6
+páginas; cinco pruebas de significancia validadas por simulación; interfaz e informe en español
+y en inglés; 64 pruebas automáticas.
 
 **Contenido**
 
@@ -147,7 +153,7 @@ Servicios externos:
 
 ```
 expediente-tierra/
-├── app.py                      Interfaz Streamlit: 4 páginas, controles y caché (939 líneas)
+├── app.py                      Interfaz Streamlit: 6 páginas  controles y caché (1 842 líneas)
 ├── abrir.command               Lanzador de doble clic para Mac
 ├── requirements.txt            Dependencias con versión fijada
 ├── pytest.ini                  Configuración de las pruebas
@@ -160,6 +166,8 @@ expediente-tierra/
 ├── expediente/                 Lógica de la aplicación (sin Streamlit)
 │   ├── __init__.py
 │   ├── variables.py            Catálogo de 46 variables y 37 referencias con DOI
+│   ├── variables_en.py         El catálogo en inglés
+│   ├── idioma.py               Idioma de la sesión y textos bilingües
 │   ├── datos.py                NASA POWER (punto y región), geocodificador y caché
 │   ├── datos_gee.py            Google Earth Engine: 12 variables; cubos de un recuadro, un país o el mundo
 │   ├── sitio.py                Todas las variables de un punto; regla tierra/mar
@@ -174,7 +182,7 @@ expediente-tierra/
 │   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
-│   └── test_caso.py            38 pruebas: análisis, región, informe, temporadas, extremos, territorios y laboratorio
+│   └── test_caso.py            39 pruebas: análisis, región, informe, temporadas, extremos, territorios, laboratorio e idioma
 ├── validacion/                 Simulaciones de Monte Carlo y filtro de calidad de datos
 │   ├── calibracion.py          Falsos positivos y potencia de cada prueba
 │   ├── veredictos.py           Falsos positivos y potencia del resultado completo
@@ -416,6 +424,17 @@ Un país baja en unos 3 segundos y el mundo en 10 a 30 la primera vez; después 
   de Pearson de las anomalías sin tendencia, con valor p de tamaño de muestra efectivo
   (Bretherton et al., 1999).
 
+### 6.2.5 Idioma (`idioma.py`)
+
+La interfaz y el informe están en español y en inglés; el selector ES/EN está en la barra
+superior y también se puede abrir la app con `?lang=en`. Cada texto se escribe en los dos
+idiomas uno junto al otro, `T("Tasa de cambio", "Rate of change")`, y `T` entrega el del idioma
+de la sesión, que vive en una variable de contexto fijada al principio de cada ejecución de
+`app.py`. El catálogo de variables en inglés está en `variables_en.py`; la clase `Variable`
+entrega cada campo en el idioma de la sesión. Los resultados con texto (nombres de pruebas,
+notas) se guardan en caché con el idioma en la clave. El español es el idioma por omisión y el
+que usan las pruebas.
+
 ### 6.3 Exploración de variables (`caso.escanear`)
 
 Para cada variable del catálogo: promedios anuales, regresión lineal, tendencia
@@ -573,10 +592,12 @@ calculan marcas de eje y colores, y arman tablas y referencias.
 
 | Grupo | Funciones |
 |---|---|
-| Páginas | `pagina_inicio`, `pagina_variables`, `pagina_analisis`, `pagina_comparacion` |
+| Páginas | `pagina_inicio`, `pagina_variables`, `pagina_analisis`, `pagina_territorio`, `pagina_comparacion`, `pagina_laboratorio` |
 | Pasos del análisis | `paso_sitio`, `paso_exploracion`, `paso_mapa`, `paso_serie`, `paso_resultado` |
 | Datos con caché | `cargar_datos`, `cargar_exploracion`, `cargar_analisis`, `cargar_region`, `cargar_mapa`, `cargar_analisis_celda`, `cargar_analisis_regional`, `buscar` |
-| Controles | `elegir_sitio`, `elegir_periodo`, `_buscar_sitio`, `_sitio_a_comparar` |
+| Controles | `elegir_sitio`, `elegir_periodo`, `elegir_meses`, `_elegir_pais`, `_buscar_sitio`, `_sitio_a_comparar` |
+| Contraste | `contraste_entre_fuentes`, `relacion_con_otra_variable`, `_tendencia_por_mes` |
+| Idioma | `por_idioma` (el idioma entra en la clave de la caché de los resultados con texto) |
 | Componentes | `encabezado`, `seccion`, `cifra`, `plotly`, `ficha_variable`, `definicion_emergente`, `contraste_con_literatura`, `metodo` |
 
 ---
@@ -677,7 +698,7 @@ Antes de entrar al catálogo, cada variable se evalúa en siete sitios
 
 ```bash
 .venv/bin/pip install pytest pymannkendall
-.venv/bin/python -m pytest                   # 63 pruebas
+.venv/bin/python -m pytest                   # 64 pruebas
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del resultado completo
 .venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas
@@ -743,19 +764,20 @@ Las referencias completas están en la página "Variables" de la app y en
 ## 12. Limitaciones conocidas
 
 - **Satélites fuera de los ejemplos.** Requieren una sesión personal de Earth Engine.
-- **Región.** Solo recuadros de 2° a 10°; no hay países, cuencas ni polígonos.
+- **Región.** Recuadros de 2° a 10°, países completos y el mundo; no hay cuencas ni polígonos propios.
+- **Países y mundo.** Solo con las variables que llegan por Earth Engine; los índices de extremos son solo para el punto.
 - **Selección de celda.** Se elige de una lista, no con un clic en el mapa.
 - **Reanálisis.** MERRA-2 puede tener saltos cuando cambian los instrumentos que asimila.
 - **Aerosoles.** Provienen de CERES SYN1deg, que puede tener discontinuidades.
 - **GRACE.** Su resolución real es de unos 300 km y tiene un hueco entre 2017 y 2018.
 - **Tendencias no lineales.** El resultado principal es una recta; la regresión en dos
   tramos solo advierte cuando no basta.
-- **Idioma.** La interfaz está solo en español.
+- **Idioma.** Español e inglés. El recorrido animado del inicio está solo en español.
 - **Nombres internos.** El código conserva nombres de la primera versión (sección 4).
 - **Pruebas de interfaz.** Se hicieron a mano; no hay pruebas automáticas de `app.py`.
 
-No se incluyen nubosidad, radiación solar ni albedo: el producto que reparte POWER
-(CERES SYN1deg) tiene saltos artificiales en esos campos cuando cambian los satélites.
+Las variables que se evaluaron y quedaron fuera, o entraron recortadas, están en la tabla
+«Filtro de calidad de las variables» de la sección 9.
 
 ---
 

@@ -169,9 +169,9 @@ def descargar_region(lat: float, lon: float, codigo: str, lado: float = 8,
     return tabla
 
 
-def buscar_lugar(texto: str, maximo: int = 5) -> list[dict]:
+def buscar_lugar(texto: str, maximo: int = 5, idioma: str = "es") -> list[dict]:
     """Busca un lugar por nombre. Devuelve [{"nombre", "lat", "lon"}], el más probable primero."""
-    consulta = {"name": texto, "count": maximo, "language": "es", "format": "json"}
+    consulta = {"name": texto, "count": maximo, "language": idioma, "format": "json"}
     try:
         respuesta = requests.get(GEOCODIFICADOR_URL, params=consulta, timeout=20)
         respuesta.raise_for_status()

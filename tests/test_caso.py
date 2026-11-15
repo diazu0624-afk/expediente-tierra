@@ -420,3 +420,29 @@ def test_relacionar_usa_las_fechas_comunes_de_las_dos_variables():
     rel = caso.relacionar(a, b)
     assert rel.resolucion == "mensual" and len(rel.a) == len(rel.b) == rel.correlacion.n == len(b.anomalias)
     assert rel.correlacion.r > 0.99  # es la misma serie
+
+
+# ---------- idioma ----------
+
+def test_el_catalogo_en_ingles_esta_completo_y_no_altera_el_espanol():
+    from expediente import idioma
+    from expediente.variables import PAREJAS, independencia
+    from expediente.variables_en import FRASES, VARIABLES_EN
+    assert set(VARIABLES_EN) == set(POR_CODIGO)
+    en_es = {v.codigo: (v.nombre, v.definicion, v.unidad, v.fuente, v.resolucion, v.aviso) for v in CATALOGO}
+    try:
+        idioma.fijar("en")
+        for v in CATALOGO:
+            for campo in ("nombre", "definicion", "tecnica", "producto", "relevancia"):
+                assert VARIABLES_EN[v.codigo].get(campo), (v.codigo, campo)
+            nombre, definicion, unidad, fuente, resolucion, aviso = en_es[v.codigo]
+            assert v.nombre != nombre and v.definicion != definicion
+            assert v.fuente == FRASES[fuente] and v.resolucion == FRASES[resolucion]  # todas las fuentes están traducidas
+            assert bool(v.aviso) == bool(aviso) and (not aviso or v.aviso != aviso)
+        assert all(independencia(c) != PAREJAS[c][1] for c in PAREJAS)
+        r = caso.interrogar(_serie(0.05), POR_CODIGO["T2M"])
+        assert r.pruebas[0].nombre == "Mann-Kendall test" and "months" in r.muestra
+    finally:
+        idioma.fijar("es")
+    assert POR_CODIGO["T2M"].nombre == "Temperatura del aire"
+    assert caso.interrogar(_serie(0.05), POR_CODIGO["T2M"]).pruebas[0].nombre == "Prueba de Mann-Kendall"

@@ -17,6 +17,7 @@ import pandas as pd
 from . import estadistica as est
 from . import veredicto
 from .caso import NIVELES, NIVELES_CORTOS, N_PRUEBAS, Interrogatorio, numero, valor_p
+from .idioma import T, actual as idioma_actual
 from .variables import METODOS, REFERENCIAS
 
 TINTA, TINTA_2, TENUE, REJILLA, EJE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
@@ -157,8 +158,11 @@ def _escala_de_color(tope: float, unidad: str) -> str:
     return (f'<div class="escala"><span>{escape(numero(-tope, signo=True))}</span>'
             f'<div style="background:linear-gradient(to right, {degradado})"></div>'
             f'<span>{escape(numero(tope, signo=True))}</span></div>'
-            f'<p class="nota">Tasa de cambio en {escape(unidad)} por década. Azul: disminuye. Rojo: aumenta. '
-            f'El punto oscuro marca las celdas con tendencia significativa; el círculo, el sitio de estudio.</p>')
+            '<p class="nota">'
+            + T(f"Tasa de cambio en {escape(unidad)} por década. Azul: disminuye. Rojo: aumenta. "
+                f"El punto oscuro marca las celdas con tendencia significativa; el círculo, el sitio de estudio.",
+                f"Rate of change in {escape(unidad)} per decade. Blue: decreasing. Red: increasing. "
+                f"The dark dot marks the cells with a significant trend; the circle, the study site.") + "</p>")
 
 
 def _tabla(filas: list[tuple[str, str]], encabezado: tuple[str, str] | None = None) -> str:
@@ -253,101 +257,140 @@ def informe_html(
     def seccion(titulo: str) -> str:
         return f'<section><h2><span class="n">{next(numero_de_seccion):02d}</span>{escape(titulo)}</h2>'
 
+    u = v.unidad
+    if r.por_temporada:
+        de_datos = T(f"; solo {r.temporada}", f"; {r.temporada} only")
+    elif v.anual:
+        de_datos = T("; un valor por año", "; one value per year")
+    else:
+        de_datos = T(" mensuales", ", monthly")
+    coordenadas = (T(f"<br>Latitud {lat:.2f}°, longitud {lon:.2f}°", f"<br>Latitude {lat:.2f}°, longitude {lon:.2f}°")
+                   if lat is not None else "")
+    descarga = (T(f" · datos descargados el {fecha_datos:%d/%m/%Y}", f" · data downloaded on {fecha_datos:%d/%m/%Y}")
+                if fecha_datos else "")
     cuerpo = [
         '<div class="portada"><div>',
         '<div class="etiqueta">NASA Space Apps 2026 · Earth System Trend Detective</div>',
-        '<div class="etiqueta" style="color:var(--tinta);margin-top:.3rem">Equipo C15H25N3O · Expediente Tierra</div>',
-        '<h1>Informe de análisis de tendencia</h1>',
-        f'<p class="sub">{escape(v.nombre)} en {escape(sitio)}</p></div>',
+        f'<div class="etiqueta" style="color:var(--tinta);margin-top:.3rem">{T("Equipo", "Team")} C15H25N3O · Expediente Tierra</div>',
+        f'<h1>{T("Informe de análisis de tendencia", "Trend analysis report")}</h1>',
+        f'<p class="sub">{escape(v.nombre)} {T("en", "in")} {escape(sitio)}</p></div>',
         '<dl>',
-        f'<dt>Variable</dt><dd>{escape(v.nombre)} ({escape(v.unidad)})</dd>',
-        f'<dt>Sitio de estudio</dt><dd>{escape(sitio)}{f"<br>Latitud {lat:.2f}°, longitud {lon:.2f}°" if lat is not None else ""}</dd>',
-        f'<dt>Periodo analizado</dt><dd>{inicio:{fecha}} a {fin:{fecha}} ({r.anios_de_datos:.0f} años de datos{f"; solo {r.temporada}" if r.por_temporada else "; un valor por año" if v.anual else " mensuales"})</dd>',
-        f'<dt>Tamaño de muestra</dt><dd>{escape(r.muestra)}</dd>',
-        f'<dt>Fuente de datos</dt><dd>{escape(v.fuente)}</dd>',
-        f'<dt>Resultado</dt><dd><strong>{escape(res.titular)}</strong></dd>',
-        f'<dt>Fecha del informe</dt><dd>{hoy:%d/%m/%Y}'
-        + (f" · datos descargados el {fecha_datos:%d/%m/%Y}" if fecha_datos else "") + '</dd>',
+        f'<dt>Variable</dt><dd>{escape(v.nombre)} ({escape(u)})</dd>',
+        f'<dt>{T("Sitio de estudio", "Study site")}</dt><dd>{escape(sitio)}{coordenadas}</dd>',
+        f'<dt>{T("Periodo analizado", "Period analysed")}</dt><dd>{inicio:{fecha}} {T("a", "to")} {fin:{fecha}} '
+        f'({r.anios_de_datos:.0f} {T("años de datos", "years of data")}{de_datos})</dd>',
+        f'<dt>{T("Tamaño de muestra", "Sample size")}</dt><dd>{escape(r.muestra)}</dd>',
+        f'<dt>{T("Fuente de datos", "Data source")}</dt><dd>{escape(v.fuente)}</dd>',
+        f'<dt>{T("Resultado", "Result")}</dt><dd><strong>{escape(res.titular)}</strong></dd>',
+        f'<dt>{T("Fecha del informe", "Date of the report")}</dt><dd>{hoy:%d/%m/%Y}{descarga}</dd>',
         '</dl></div>',
     ]
 
+    def cifra(etiqueta: str, valor: str, unidad: str) -> str:
+        return (f'<div><div class="etiqueta">{escape(etiqueta)}</div><div class="v">{escape(valor)}</div>'
+                f'<div class="u">{escape(unidad) or "&nbsp;"}</div></div>')
+
+    def parrafo(titulo: str, texto: str) -> str:
+        return f"<p><strong>{escape(titulo)}.</strong> {escape(texto)}</p>"
+
+    def aviso(titulo: str, texto: str) -> str:
+        return f'<div class="aviso"><strong>{escape(titulo)}.</strong> {escape(texto)}</div>'
+
     # ---- Resumen
-    u = v.unidad
     cuerpo += [
-        seccion("Resumen"),
+        seccion(T("Resumen", "Summary")),
         f'<div class="etiqueta">{escape(NIVELES[r.nivel])}</div><p class="titular">{escape(res.titular)}</p>',
         '<div class="cifras">',
-        f'<div><div class="etiqueta">Tasa de cambio</div><div class="v">{escape(numero(r.pendiente_decada, signo=True))}</div><div class="u">{escape(u)} por década</div></div>',
-        f'<div><div class="etiqueta">Cambio acumulado</div><div class="v">{escape(numero(r.cambio_total, signo=True))}</div><div class="u">{escape(u)} en {r.anios_de_datos:.0f} años</div></div>',
-        f'<div><div class="etiqueta">Pruebas superadas</div><div class="v">{r.aprobadas}/{N_PRUEBAS}</div><div class="u">pruebas de significancia</div></div>',
-        f'<div><div class="etiqueta">Nivel de evidencia</div><div class="v">{escape(NIVELES_CORTOS[r.nivel])}</div><div class="u">&nbsp;</div></div>',
+        cifra(T("Tasa de cambio", "Rate of change"), numero(r.pendiente_decada, signo=True), T(f"{u} por década", f"{u} per decade")),
+        cifra(T("Cambio acumulado", "Accumulated change"), numero(r.cambio_total, signo=True),
+              T(f"{u} en {r.anios_de_datos:.0f} años", f"{u} in {r.anios_de_datos:.0f} years")),
+        cifra(T("Pruebas superadas", "Tests passed"), f"{r.aprobadas}/{N_PRUEBAS}", T("pruebas de significancia", "significance tests")),
+        cifra(T("Nivel de evidencia", "Level of evidence"), NIVELES_CORTOS[r.nivel], ""),
         '</div>',
-        f'<p><strong>Tasa de cambio.</strong> {escape(res.cuanto)}</p>',
-        f'<p><strong>Significancia estadística.</strong> {escape(res.evidencia)}</p>',
+        parrafo(T("Tasa de cambio", "Rate of change"), res.cuanto),
+        parrafo(T("Significancia estadística", "Statistical significance"), res.evidencia),
     ]
     if res.relevancia:
-        cuerpo.append(f'<p><strong>Relevancia práctica.</strong> {escape(res.relevancia)}</p>')
+        cuerpo.append(parrafo(T("Relevancia práctica", "Practical relevance"), res.relevancia))
     if res.espera:
-        cuerpo.append(f'<p><strong>Años de datos necesarios.</strong> {escape(res.espera)}</p>')
+        cuerpo.append(parrafo(T("Años de datos necesarios", "Years of data needed"), res.espera))
     if hipotesis:
-        cuerpo.append(f'<p><strong>Hipótesis inicial.</strong> {escape(hipotesis)}</p>')
+        cuerpo.append(parrafo(T("Hipótesis inicial", "Initial hypothesis"), hipotesis))
     if res.no_lineal:
-        cuerpo.append(f'<div class="aviso"><strong>Tendencia no lineal.</strong> {escape(res.no_lineal)}</div>')
+        cuerpo.append(aviso(T("Tendencia no lineal", "Non-linear trend"), res.no_lineal))
     if res.registro_corto:
-        cuerpo.append(f'<div class="aviso"><strong>Registro corto.</strong> {escape(res.registro_corto)}</div>')
+        cuerpo.append(aviso(T("Registro corto", "Short record"), res.registro_corto))
     cuerpo.append("</section>")
 
     # ---- Variable
     cuerpo += [
-        seccion("Variable analizada"),
-        f'<p><strong>En pocas palabras.</strong> {escape(v.definicion)}</p>',
-        f'<p><strong>Definición técnica.</strong> {escape(v.tecnica)}</p>',
-        f'<p><strong>Relevancia para el sistema Tierra.</strong> {escape(v.relevancia)}</p>',
-        _tabla([("Nombre original", v.nombre_original), ("Código", v.codigo), ("Unidad", v.unidad),
-                ("Producto de datos", v.producto), ("Acceso", v.fuente), ("Resolución espacial", v.resolucion)]),
+        seccion(T("Variable analizada", "Variable analysed")),
+        parrafo(T("En pocas palabras", "In a few words"), v.definicion),
+        parrafo(T("Definición técnica", "Technical definition"), v.tecnica),
+        parrafo(T("Relevancia para el sistema Tierra", "Relevance to the Earth system"), v.relevancia),
+        _tabla([(T("Nombre original", "Original name"), v.nombre_original), (T("Código", "Code"), v.codigo),
+                (T("Unidad", "Unit"), u), (T("Producto de datos", "Data product"), v.producto),
+                (T("Acceso", "Access"), v.fuente), (T("Resolución espacial", "Spatial resolution"), v.resolucion)]),
     ]
     if v.aviso:
-        cuerpo.append(f'<p><strong>Advertencia sobre los datos.</strong> {escape(v.aviso)}</p>')
+        cuerpo.append(parrafo(T("Advertencia sobre los datos", "Caveat about the data"), v.aviso))
     cuerpo.append("</section>")
 
     # ---- Serie de tiempo
+    nombre = escape(v.nombre)
     if r.resolucion == "mensual":
-        leyenda = (f'<span><i style="border-color:{EJE};border-top-width:1px"></i>Anomalía mensual</span>'
-                   f'<span><i style="border-color:{AZUL}"></i>Media móvil de 12 meses</span>')
-        pie = (f"Anomalías de la variable «{escape(v.nombre)}», en {escape(u)}: a cada mes se le restó su climatología "
-               f"(el promedio de ese mes del año) para eliminar el ciclo estacional.")
+        leyenda = (f'<span><i style="border-color:{EJE};border-top-width:1px"></i>{T("Anomalía mensual", "Monthly anomaly")}</span>'
+                   f'<span><i style="border-color:{AZUL}"></i>{T("Media móvil de 12 meses", "12-month moving average")}</span>')
+        pie = T(f"Anomalías de la variable «{nombre}», en {escape(u)}: a cada mes se le restó su climatología "
+                f"(el promedio de ese mes del año) para eliminar el ciclo estacional.",
+                f"Anomalies of the variable “{nombre}”, in {escape(u)}: each month had its climatology (the mean of "
+                f"that month of the year) subtracted to remove the seasonal cycle.")
+    elif r.por_temporada:
+        leyenda = f'<span><i style="border-color:{AZUL}"></i>{T(f"Promedio de {r.temporada}", f"{r.temporada} mean")}</span>'
+        pie = T(f"Promedios de {r.temporada} de la variable «{nombre}», en {escape(u)}: un dato por año.",
+                f"{r.temporada} means of the variable “{nombre}”, in {escape(u)}: one value per year.")
+    elif v.anual:
+        leyenda = f'<span><i style="border-color:{AZUL}"></i>{T("Valor de cada año", "Value of each year")}</span>'
+        pie = T(f"Valores anuales del índice «{nombre}», en {escape(u)}, calculados con los datos diarios.",
+                f"Annual values of the index “{nombre}”, in {escape(u)}, computed from daily data.")
     else:
-        leyenda = f'<span><i style="border-color:{AZUL}"></i>{"Promedio de " + r.temporada if r.por_temporada else "Valor de cada año" if v.anual else "Promedio anual"}</span>'
-        pie = (f"Promedios de {r.temporada} de la variable «{escape(v.nombre)}», en {escape(u)}: un dato por año."
-               if r.por_temporada else
-               f"Valores anuales del índice «{escape(v.nombre)}», en {escape(u)}, calculados con los datos diarios."
-               if v.anual else
-               f"Promedios anuales de la variable «{escape(v.nombre)}», en {escape(u)}. Esta variable solo toma valores "
-               f"parte del año, por lo que se analiza por año.")
+        leyenda = f'<span><i style="border-color:{AZUL}"></i>{T("Promedio anual", "Annual mean")}</span>'
+        pie = T(f"Promedios anuales de la variable «{nombre}», en {escape(u)}. Esta variable solo toma valores "
+                f"parte del año, por lo que se analiza por año.",
+                f"Annual means of the variable “{nombre}”, in {escape(u)}. This variable only takes values part "
+                f"of the year, so it is analysed by year.")
     cuerpo += [
-        seccion("Serie de tiempo"),
-        f'<figure><div class="leyenda">{leyenda}<span><i style="border-color:{TINTA}"></i>Tendencia lineal</span>'
-        f'<span><i class="banda"></i>Intervalo de confianza del 95 %</span></div>',
+        seccion(T("Serie de tiempo", "Time series")),
+        f'<figure><div class="leyenda">{leyenda}<span><i style="border-color:{TINTA}"></i>{T("Tendencia lineal", "Linear trend")}</span>'
+        f'<span><i class="banda"></i>{T("Intervalo de confianza del 95 %", "95 % confidence interval")}</span></div>',
         _svg_serie(r),
-        f'<figcaption>{pie} La recta es la regresión lineal por mínimos cuadrados y la banda, el intervalo de '
-        f'confianza del 95 % de su pendiente.</figcaption></figure>',
+        f'<figcaption>{pie} '
+        + T("La recta es la regresión lineal por mínimos cuadrados y la banda, el intervalo de confianza del 95 % de su pendiente.",
+            "The straight line is the least-squares linear regression and the band, the 95 % confidence interval of its slope.")
+        + '</figcaption></figure>',
     ]
     cambio = veredicto.cambio_de_comportamiento(r)
     if cambio:
-        cuerpo.append(f'<p><strong>Cambio de comportamiento.</strong> {escape(cambio)}</p>')
+        cuerpo.append(parrafo(T("Cambio de comportamiento", "Change in behaviour"), cambio))
     cuerpo.append("</section>")
 
     # ---- Pruebas
     filas = "".join(
         f'<tr><th>{escape(p.nombre)}</th><td>{escape(p.pregunta)}<br><span style="color:var(--tinta2)">{escape(p.resultado)}</span></td>'
-        f'<td class="estado">{"Pasa" if p.aprobada else "No pasa"}</td></tr>' for p in r.pruebas)
+        f'<td class="estado">{T("Pasa", "Pass") if p.aprobada else T("No pasa", "Fail")}</td></tr>' for p in r.pruebas)
     cuerpo += [
-        seccion("Pruebas de significancia"),
-        f'<p>Cada prueba da un valor p: la probabilidad de observar una tendencia al menos tan marcada como esta si en '
-        f'realidad no hubiera ninguna. Una prueba se supera si p es menor que el nivel de significancia α = {est.ALFA}.</p>',
-        f'<table><thead><tr><th>Prueba</th><th>Pregunta y resultado</th><th>Estado</th></tr></thead><tbody>{filas}</tbody></table>',
-        f'<p class="nota">Sin corregir la autocorrelación, la prueba de Mann-Kendall daba {escape(valor_p(r.mk_ingenuo.p))}; '
-        f'corregida, {escape(valor_p(r.mk.prueba.p))}.</p></section>',
+        seccion(T("Pruebas de significancia", "Significance tests")),
+        "<p>" + T(f"Cada prueba da un valor p: la probabilidad de observar una tendencia al menos tan marcada como esta si en "
+                  f"realidad no hubiera ninguna. Una prueba se supera si p es menor que el nivel de significancia α = {est.ALFA}.",
+                  f"Each test gives a p-value: the probability of observing a trend at least as marked as this one if there "
+                  f"were actually none. A test is passed if p is below the significance level α = {est.ALFA}.") + "</p>",
+        f'<table><thead><tr><th>{T("Prueba", "Test")}</th><th>{T("Pregunta y resultado", "Question and result")}</th>'
+        f'<th>{T("Estado", "Status")}</th></tr></thead><tbody>{filas}</tbody></table>',
+        '<p class="nota">'
+        + T(f"Sin corregir la autocorrelación, la prueba de Mann-Kendall daba {escape(valor_p(r.mk_ingenuo.p))}; "
+            f"corregida, {escape(valor_p(r.mk.prueba.p))}.",
+            f"Without correcting for autocorrelation, the Mann-Kendall test gave {escape(valor_p(r.mk_ingenuo.p))}; "
+            f"corrected, {escape(valor_p(r.mk.prueba.p))}.") + "</p></section>",
     ]
 
     # ---- Distribución espacial
@@ -356,59 +399,82 @@ def informe_html(
         sube = 100 * (firmes["pendiente_decada"] > 0).sum() / len(mapa)
         baja = 100 * (firmes["pendiente_decada"] < 0).sum() / len(mapa)
         cuerpo += [
-            seccion("Distribución espacial"),
-            f'<p>{escape(region)} La tendencia es positiva y significativa en {sube:.0f} % de las {len(mapa)} celdas con '
-            f'datos, y negativa y significativa en {baja:.0f} %.</p>',
+            seccion(T("Distribución espacial", "Spatial distribution")),
+            f"<p>{escape(region)} "
+            + T(f"La tendencia es positiva y significativa en {sube:.0f} % de las {len(mapa)} celdas con "
+                f"datos, y negativa y significativa en {baja:.0f} %.",
+                f"The trend is positive and significant in {sube:.0f} % of the {len(mapa)} cells with data, and "
+                f"negative and significant in {baja:.0f} %.") + "</p>",
             f'<figure><div class="mapa">{_svg_mapa(mapa, lat if lat is not None else float("nan"), lon if lon is not None else float("nan"))}</div>',
             _escala_de_color(float(mapa["pendiente_decada"].abs().max()) or 1.0, u),
-            '<figcaption>Tendencia de cada celda calculada con sus promedios anuales. La significancia se ajustó con '
-            'el procedimiento de Benjamini-Hochberg por comparaciones múltiples. Las zonas sin color no tienen '
-            'datos de esta variable.</figcaption></figure></section>',
+            "<figcaption>"
+            + T("Tendencia de cada celda calculada con un valor por año. La significancia se ajustó con "
+                "el procedimiento de Benjamini-Hochberg por comparaciones múltiples. Las zonas sin color no tienen "
+                "datos de esta variable.",
+                "Trend of each cell computed with one value per year. Significance was adjusted with the "
+                "Benjamini-Hochberg procedure for multiple comparisons. Uncoloured areas have no data for this "
+                "variable.") + "</figcaption></figure></section>",
         ]
 
     # ---- Ficha técnica
     cuerpo += [
-        seccion("Ficha técnica"),
-        _tabla(veredicto.ficha_tecnica(r), ("Característica", "Detalle")),
-        "<h3>Supuestos del análisis</h3><ul>" + "".join(f"<li>{escape(x)}</li>" for x in veredicto.SUPUESTOS) + "</ul>",
-        "<h3>Limitaciones</h3><ul>" + "".join(f"<li>{escape(x)}</li>" for x in res.advertencias) + "</ul></section>",
+        seccion(T("Ficha técnica", "Technical sheet")),
+        _tabla(veredicto.ficha_tecnica(r), (T("Característica", "Feature"), T("Detalle", "Detail"))),
+        f"<h3>{T('Supuestos del análisis', 'Assumptions of the analysis')}</h3><ul>"
+        + "".join(f"<li>{escape(x)}</li>" for x in veredicto.SUPUESTOS) + "</ul>",
+        f"<h3>{T('Limitaciones', 'Limitations')}</h3><ul>" + "".join(f"<li>{escape(x)}</li>" for x in res.advertencias) + "</ul></section>",
     ]
 
     # ---- Contraste con la literatura
     claves = list(v.referencias)
     if contraste:
         texto, clave = contraste
-        cuerpo += [seccion("Contraste con la literatura"), f"<p>{escape(texto)}</p></section>"]
+        cuerpo += [seccion(T("Contraste con la literatura", "Comparison with the literature")), f"<p>{escape(texto)}</p></section>"]
         if clave:
             claves.append(clave)
 
     # ---- Método
     cuerpo += [
-        seccion("Método"),
-        "<p>La serie mensual se descarga de la fuente indicada y se le resta la climatología de cada mes para eliminar "
-        "el ciclo estacional. La tasa de cambio es la pendiente de una regresión lineal por mínimos cuadrados; su "
-        "intervalo de confianza del 95 % se obtiene por bootstrap de 2,000 series que conservan la variabilidad y la "
-        "autocorrelación de la serie original.</p>"
-        "<p>La significancia se evalúa con cinco pruebas: Mann-Kendall con preblanqueo iterativo (Zhang et al., 2000; "
-        "Wang y Swail, 2001), prueba t de la pendiente con tamaño de muestra efectivo (Santer et al., 2000), intervalo "
-        "de confianza por bootstrap, persistencia con promedios anuales y sensibilidad al periodo. El nivel de "
-        "evidencia es sólido con cinco pruebas superadas, fuerte con cuatro, débil con dos o tres e insuficiente con "
-        "menos. Esta escala es un criterio del equipo; en una simulación con series sin tendencia produjo evidencia "
-        "fuerte o sólida en 3 a 4 de cada 100 casos.</p></section>",
+        seccion(T("Método", "Method")),
+        T("<p>La serie mensual se descarga de la fuente indicada y se le resta la climatología de cada mes para eliminar "
+          "el ciclo estacional. La tasa de cambio es la pendiente de una regresión lineal por mínimos cuadrados; su "
+          "intervalo de confianza del 95 % se obtiene por bootstrap de 2,000 series que conservan la variabilidad y la "
+          "autocorrelación de la serie original.</p>"
+          "<p>La significancia se evalúa con cinco pruebas: Mann-Kendall con preblanqueo iterativo (Zhang et al., 2000; "
+          "Wang y Swail, 2001), prueba t de la pendiente con tamaño de muestra efectivo (Santer et al., 2000), intervalo "
+          "de confianza por bootstrap, persistencia con promedios anuales y sensibilidad al periodo. El nivel de "
+          "evidencia es sólido con cinco pruebas superadas, fuerte con cuatro, débil con dos o tres e insuficiente con "
+          "menos. Esta escala es un criterio del equipo; en una simulación con series sin tendencia produjo evidencia "
+          "fuerte o sólida en 3 a 4 de cada 100 casos.</p></section>",
+          "<p>The monthly series is downloaded from the stated source and the climatology of each month is subtracted "
+          "to remove the seasonal cycle. The rate of change is the slope of a least-squares linear regression; its 95 % "
+          "confidence interval is obtained by a bootstrap of 2,000 series that preserve the variability and the "
+          "autocorrelation of the original series.</p>"
+          "<p>Significance is assessed with five tests: Mann-Kendall with iterative prewhitening (Zhang et al., 2000; "
+          "Wang and Swail, 2001), t-test of the slope with effective sample size (Santer et al., 2000), bootstrap "
+          "confidence interval, persistence with annual means and sensitivity to the period. The level of evidence is "
+          "solid with five tests passed, strong with four, weak with two or three and insufficient with fewer. This "
+          "scale is a criterion of the team; in a simulation with trend-free series it produced strong or solid "
+          "evidence in 3 to 4 of every 100 cases.</p></section>"),
     ]
 
     # ---- Referencias
     cuerpo += [
-        seccion("Referencias"),
-        "<h3>Datos</h3><ol class='referencias'>" + "".join(_referencia(c) for c in claves) + "</ol>",
-        "<h3>Métodos estadísticos</h3><ol class='referencias'>" + "".join(_referencia(c) for c in METODOS) + "</ol></section>",
-        f'<footer>Informe generado el {hoy:%d/%m/%Y} con Expediente Tierra, herramienta del equipo C15H25N3O para el '
-        f'NASA Space Apps Challenge 2026. Los datos pertenecen a sus fuentes originales; este informe no es un '
-        f'producto oficial de la NASA.</footer>',
+        seccion(T("Referencias", "References")),
+        f"<h3>{T('Datos', 'Data')}</h3><ol class='referencias'>" + "".join(_referencia(c) for c in claves) + "</ol>",
+        f"<h3>{T('Métodos estadísticos', 'Statistical methods')}</h3><ol class='referencias'>"
+        + "".join(_referencia(c) for c in METODOS) + "</ol></section>",
+        "<footer>"
+        + T(f"Informe generado el {hoy:%d/%m/%Y} con Expediente Tierra, herramienta del equipo C15H25N3O para el "
+            f"NASA Space Apps Challenge 2026. Los datos pertenecen a sus fuentes originales; este informe no es un "
+            f"producto oficial de la NASA.",
+            f"Report generated on {hoy:%d/%m/%Y} with Expediente Tierra, a tool by team C15H25N3O for the NASA Space "
+            f"Apps Challenge 2026. The data belong to their original sources; this report is not an official NASA "
+            f"product.") + "</footer>",
     ]
 
-    titulo = f"Informe de tendencia: {v.nombre} en {sitio}"
-    return (f'<!doctype html><html lang="es"><head><meta charset="utf-8">'
+    titulo = T(f"Informe de tendencia: {v.nombre} en {sitio}", f"Trend report: {v.nombre} in {sitio}")
+    return (f'<!doctype html><html lang="{idioma_actual()}"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<title>{escape(titulo)}</title><style>{ESTILO}</style></head><body><main>'
             + "".join(cuerpo) + "</main></body></html>")
