@@ -151,9 +151,11 @@ def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
     """Diseño del análisis, en el formato que se pide al reportar significancia estadística."""
     inicio, fin = r.serie.index.min(), r.serie.index.max()
     datos = ("anomalías mensuales" if r.resolucion == "mensual"
-             else f"promedios de {r.temporada} (uno por año)" if r.por_temporada else "promedios anuales")
+             else f"promedios de {r.temporada} (uno por año)" if r.por_temporada
+             else "valores anuales del índice" if r.variable.anual else "promedios anuales")
+    formato = "%Y" if r.variable.anual else "%m/%Y"
     return [
-        ("Periodo", f"{inicio:%m/%Y} a {fin:%m/%Y}"),
+        ("Periodo", f"{inicio:{formato}} a {fin:{formato}}"),
         ("Meses analizados", r.temporada.capitalize()),
         ("Tamaño de muestra", f"{r.regresion.n} {datos}; tamaño efectivo de {r.regresion.n_efectivo:.0f} "
                               f"tras descontar la autocorrelación (r₁ = {max(r.regresion.r1, 0):.2f})"),

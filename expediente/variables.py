@@ -124,6 +124,11 @@ REFERENCIAS: dict[str, Referencia] = {
         "Reynolds, R. W., Banzon, V. F., & NOAA CDR Program (2008). NOAA Optimum Interpolation "
         "1/4 Degree Daily Sea Surface Temperature (OISST) Analysis, Version 2. NOAA National "
         "Centers for Environmental Information.", _doi("10.7289/V5SQ8XB5")),
+    "zhang2011": Referencia(
+        "Zhang, X., Alexander, L., Hegerl, G. C., Jones, P., Klein Tank, A., Peterson, T. C., "
+        "Trewin, B., & Zwiers, F. W. (2011). Indices for monitoring changes in extremes based on "
+        "daily temperature and precipitation data. WIREs Climate Change, 2(6), 851-870.",
+        _doi("10.1002/wcc.147")),
     "gorelick2017": Referencia(
         "Gorelick, N., Hancher, M., Dixon, M., Ilyushchenko, S., Thau, D., & Moore, R. (2017). "
         "Google Earth Engine: Planetary-scale geospatial analysis for everyone. Remote "
@@ -204,14 +209,21 @@ class Variable:
     # True si tiene sentido hablar de "cambió un X %" (no aplica a °C: 20 °C no es "el doble" de 10 °C).
     relativo: bool = False
     aviso: str = ""
-    # "power": por la API de NASA POWER. "gee": por Google Earth Engine.
+    # "power": mensual, por la API de NASA POWER. "gee": mensual, por Google Earth Engine.
+    # "diario": índice anual calculado con los datos diarios de NASA POWER (expediente/extremos.py).
     origen: str = "power"
     tipo: str = ""  # vacío: se deduce del origen (ver la propiedad `clase`)
 
     @property
     def clase(self) -> str:
         """Qué clase de dato es: una observación, o el resultado de un modelo."""
-        return self.tipo or ("Observación satelital" if self.origen == "gee" else "Reanálisis o modelo")
+        return self.tipo or {"gee": "Observación satelital", "diario": "Índice anual de extremos"}.get(
+            self.origen, "Reanálisis o modelo")
+
+    @property
+    def anual(self) -> bool:
+        """True si la variable trae un solo valor por año (los índices de extremos)."""
+        return self.origen == "diario"
 
     @property
     def nombre_original(self) -> str:
@@ -228,7 +240,22 @@ HUMEDAD = "Humedad atmosférica"
 AIRE = "Atmósfera"
 OCEANO = "Océano"
 VEGETACION = "Vegetación"
-CATEGORIAS = (TEMPERATURA, HIDRO, HUMEDAD, AIRE, OCEANO, VEGETACION)
+EXTREMOS = "Extremos"
+CATEGORIAS = (TEMPERATURA, HIDRO, HUMEDAD, AIRE, OCEANO, VEGETACION, EXTREMOS)
+
+DIARIO = "MERRA-2 (reanálisis de la NASA), datos diarios vía NASA POWER"
+_EXT = ("zhang2011", "gelaro2017", "power")
+_AVISO_EXT = ("Los extremos de un reanálisis de unos 50 km son más suaves que los de una estación "
+              "meteorológica: sirven para evaluar la tendencia, no el valor exacto de un evento.")
+
+
+def _extremo(codigo: str, nombre: str, unidad: str, definicion: str, tecnica: str, campo: str,
+             relativo: bool = False) -> "Variable":
+    return Variable(codigo, nombre, unidad, EXTREMOS, definicion, tecnica,
+                    f"Calculado por este proyecto con el campo diario {campo} de MERRA-2. Un valor por año; "
+                    f"solo cuentan los años con al menos 360 días de datos.",
+                    _EXT, fuente=DIARIO, relativo=relativo, aviso=_AVISO_EXT, origen="diario")
+
 
 # Variables que se evaluaron y NO se incluyen, por no pasar el filtro de calidad
 # (validacion/calidad_de_datos.py):
@@ -502,10 +529,45 @@ CATALOGO: tuple[Variable, ...] = (
              relativo=True, origen="gee",
              aviso="La clorofila tiene una distribución muy asimétrica: unos pocos florecimientos "
                    "intensos pesan mucho en el promedio."),
+    # --- Extremos: índices anuales calculados con datos diarios (definiciones del ETCCDI) ---
+    _extremo("EXT_TXX", "Día más caluroso del año", "°C",
+             "La temperatura máxima más alta que se registró en el año.",
+             "Índice TXx del ETCCDI: máximo anual de la temperatura máxima diaria a 2 m.", "T2M_MAX"),
+    _extremo("EXT_TNN", "Noche más fría del año", "°C",
+             "La temperatura mínima más baja que se registró en el año.",
+             "Índice TNn del ETCCDI: mínimo anual de la temperatura mínima diaria a 2 m.", "T2M_MIN"),
+    _extremo("EXT_DIAS_CALOR", "Días de calor extremo para el lugar", "días/año",
+             "Cuántos días del año fueron más calurosos que el 90 % de los días de 1981 a 2010 en ese mismo lugar.",
+             "Días al año con temperatura máxima superior al percentil 90 de las máximas diarias del periodo "
+             "base 1981-2010 del sitio. Variante simplificada del índice TX90p del ETCCDI: el umbral es uno "
+             "solo para todo el año, no uno por día del calendario.", "T2M_MAX", relativo=True),
+    _extremo("EXT_DIAS_35", "Días con más de 35 °C", "días/año",
+             "Cuántos días del año la temperatura máxima superó los 35 °C.",
+             "Días al año con temperatura máxima diaria a 2 m superior a 35 °C (umbral fijo).", "T2M_MAX",
+             relativo=True),
+    _extremo("EXT_NOCHES_20", "Noches tropicales", "días/año",
+             "Cuántas noches del año la temperatura no bajó de 20 °C.",
+             "Índice TR del ETCCDI: días al año con temperatura mínima diaria superior a 20 °C.", "T2M_MIN",
+             relativo=True),
+    _extremo("EXT_RX1", "Lluvia máxima en un día", "mm",
+             "Cuánto llovió el día más lluvioso del año.",
+             "Índice Rx1day del ETCCDI: máximo anual de la precipitación diaria.", "PRECTOTCORR", relativo=True),
+    _extremo("EXT_R10", "Días con lluvia fuerte", "días/año",
+             "Cuántos días del año llovieron 10 mm o más.",
+             "Índice R10mm del ETCCDI: días al año con precipitación diaria de 10 mm o más.", "PRECTOTCORR",
+             relativo=True),
+    _extremo("EXT_CDD", "Racha seca más larga", "días",
+             "El mayor número de días seguidos sin lluvia en el año.",
+             "Índice CDD del ETCCDI: máximo de días consecutivos con precipitación inferior a 1 mm. Aquí la "
+             "racha se cuenta dentro de cada año calendario.", "PRECTOTCORR", relativo=True),
 )
 
 # Nombre con el que el proveedor publica cada variable (para buscarla en su documentación).
 NOMBRES_ORIGINALES = {
+    "EXT_TXX": "TXx (ETCCDI), from T2M_MAX daily", "EXT_TNN": "TNn (ETCCDI), from T2M_MIN daily",
+    "EXT_DIAS_CALOR": "TX90p simplified, from T2M_MAX daily", "EXT_DIAS_35": "Days with TX > 35 °C, from T2M_MAX daily",
+    "EXT_NOCHES_20": "TR (ETCCDI), from T2M_MIN daily", "EXT_RX1": "Rx1day (ETCCDI), from PRECTOTCORR daily",
+    "EXT_R10": "R10mm (ETCCDI), from PRECTOTCORR daily", "EXT_CDD": "CDD (ETCCDI), from PRECTOTCORR daily",
     "T2M": "Temperature at 2 Meters", "T2M_MAX": "Temperature at 2 Meters Maximum",
     "T2M_MIN": "Temperature at 2 Meters Minimum", "T2M_RANGE": "Temperature at 2 Meters Range",
     "TS": "Earth Skin Temperature", "FROST_DAYS": "Frost Days",
@@ -533,6 +595,14 @@ NOMBRES_ORIGINALES = {
 
 # Por qué importa cada variable para el sistema Tierra.
 RELEVANCIA = {
+    "EXT_TXX": "El calor más intenso del año pone a prueba la salud, la red eléctrica y los cultivos más que el promedio.",
+    "EXT_TNN": "El frío más intenso del año determina las heladas dañinas y qué especies y plagas sobreviven al invierno.",
+    "EXT_DIAS_CALOR": "Mide las olas de calor con la vara de cada lugar: lo que es extremo en una ciudad templada es normal en el desierto.",
+    "EXT_DIAS_35": "Sobre 35 °C aumentan el golpe de calor, las pérdidas agrícolas y la demanda de energía para enfriar.",
+    "EXT_NOCHES_20": "Las noches cálidas impiden que el cuerpo y las ciudades se recuperen del calor del día.",
+    "EXT_RX1": "Los aguaceros más intensos causan inundaciones repentinas y deslaves; una atmósfera más cálida retiene más vapor.",
+    "EXT_R10": "La lluvia fuerte recarga presas y acuíferos, pero también erosiona el suelo y satura el drenaje.",
+    "EXT_CDD": "Las rachas secas largas agotan la humedad del suelo y elevan el riesgo de sequía e incendios.",
     "T2M": "Es el indicador básico del calentamiento global y condiciona la salud, la agricultura y la demanda de energía.",
     "T2M_MAX": "Los extremos de calor determinan las olas de calor, el estrés térmico y el riesgo de incendios.",
     "T2M_MIN": "Las mínimas controlan las heladas y el descanso nocturno de personas y cultivos.",

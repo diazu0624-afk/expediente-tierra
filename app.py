@@ -92,6 +92,7 @@ def contraste_con_literatura(nombre_del_sitio: str, codigo: str) -> None:
 # que se pueda medir en el sitio). La lista vacía deja la de mayor tendencia.
 TEMAS = {
     "Temperatura": ["T2M"],
+    "Calor y lluvia extremos": ["EXT_DIAS_CALOR", "EXT_TXX", "EXT_RX1", "EXT_CDD"],
     "Precipitación y agua": ["GRACE_AGUA", "GPM_LLUVIA", "PRECTOTCORR"],
     "Calidad del aire": ["AOD_55"],
     "Vegetación y cultivos": ["MODIS_NDVI", "GWETROOT"],
@@ -202,6 +203,8 @@ def cargar_analisis(lat: float, lon: float, codigo: str, periodo: Periodo,
 def cargar_region(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFrame:
     if POR_CODIGO[codigo].origen == "gee":
         return datos_gee.recortar(datos_gee.descargar_cubo(lat, lon, codigo), lat, lon, lado)
+    if POR_CODIGO[codigo].origen == "diario":
+        raise datos.ErrorDeDatos("Los índices de extremos se calculan con datos diarios, que solo existen para el punto.")
     return datos.descargar_region(lat, lon, codigo, lado)
 
 
@@ -419,8 +422,9 @@ def pagina_inicio() -> None:
     seccion(5, "Datos")
     satelite = sum(v.origen == "gee" for v in CATALOGO)
     a, b, c = st.columns(3)
-    cifra(a, "Variables", f"{len(CATALOGO)}", "tierra, atmósfera y océano; series mensuales")
-    cifra(b, "De reanálisis", f"{len(CATALOGO) - satelite}", "MERRA-2 y CERES, vía NASA POWER")
+    extremos = sum(v.origen == "diario" for v in CATALOGO)
+    cifra(a, "Variables", f"{len(CATALOGO)}", f"tierra, atmósfera y océano; {extremos} son índices de extremos con datos diarios")
+    cifra(b, "De reanálisis", f"{sum(v.origen == 'power' for v in CATALOGO)}", "MERRA-2 y CERES, vía NASA POWER")
     cifra(c, "De satélites y modelos", f"{satelite}", "GPM, MODIS, GRACE, OMI, FLDAS y OISST, vía Earth Engine")
     st.page_link(PAGINAS["variables"], label="Definiciones y referencias de las variables",
                  icon=":material/arrow_forward:")
@@ -438,8 +442,9 @@ def pagina_variables() -> None:
     encabezado(
         "Catálogo",
         "Variables",
-        f"{len(CATALOGO)} variables mensuales de tierra, atmósfera y océano: {len(CATALOGO) - satelite} de "
-        f"reanálisis vía NASA POWER y {satelite} de satélites y modelos vía Google Earth Engine. Cada una "
+        f"{len(CATALOGO)} variables de tierra, atmósfera y océano: {sum(v.origen == 'power' for v in CATALOGO)} "
+        f"mensuales de reanálisis vía NASA POWER, {satelite} de satélites y modelos vía Google Earth Engine y "
+        f"{sum(v.origen == 'diario' for v in CATALOGO)} índices anuales de extremos calculados con datos diarios. Cada una "
         f"con su definición, el producto de datos del que proviene y sus referencias.",
     )
 
@@ -513,7 +518,9 @@ def paso_sitio(sitio: dict, tabla_datos: pd.DataFrame) -> None:
         f"Latitud {sitio['lat']:.2f}, longitud {sitio['lon']:.2f}  \n"
         f"Datos mensuales de {tabla_datos.index.min():%Y} a {tabla_datos.index.max():%Y}: "
         f"{sum(v.origen == 'power' and v.codigo in tabla_datos for v in CATALOGO)} variables de reanálisis vía NASA POWER"
-        + (f" y {len(satelites)} de satélites y modelos vía Google Earth Engine." if satelites else ".")
+        + (f", {len(satelites)} de satélites y modelos vía Google Earth Engine" if satelites else "")
+        + f" y {sum(v.origen == 'diario' and v.codigo in tabla_datos for v in CATALOGO)} índices de extremos "
+          f"calculados con los datos diarios."
     )
     if not satelites:
         texto.caption("Las variables que llegan por Google Earth Engine (GPM, MODIS, GRACE, OMI, océano) "
@@ -587,6 +594,10 @@ def paso_mapa(sitio: dict, codigo: str, periodo: Periodo,
     """
     v = POR_CODIGO[codigo]
     seccion(3, "Distribución espacial de la tendencia")
+    if v.anual:
+        st.info("Los índices de extremos se calculan con los datos diarios del punto. La NASA no entrega datos "
+                "diarios por región, así que esta variable no tiene mapa: el análisis corresponde al sitio de estudio.")
+        return None
     lado = st.slider("Tamaño de la región: lado del recuadro alrededor del sitio, en grados", 2, 10, 8, step=2,
                      help="Un grado equivale a unos 111 km. La NASA entrega recuadros de 2° a 10°.")
     try:
@@ -688,7 +699,10 @@ def paso_serie(r: caso.Interrogatorio) -> None:
 
     st.markdown(f"**Tamaño de muestra.** {r.muestra}. Tamaño efectivo tras descontar la "
                 f"autocorrelación: {r.regresion.n_efectivo:.0f}.")
-    if r.por_temporada:
+    if v.anual:
+        (con_tendencia,) = st.tabs(["Valores anuales y tendencia"])
+        mensual = original = None
+    elif r.por_temporada:
         con_tendencia, original = st.tabs([f"Tendencia de {r.temporada}", "Serie original"])
         mensual = None
     else:
@@ -697,6 +711,9 @@ def paso_serie(r: caso.Interrogatorio) -> None:
         if r.resolucion == "mensual":
             st.caption("A cada mes se le restó su climatología (el promedio de ese mes del año). "
                        "Así se elimina el ciclo estacional y queda la variación de fondo.")
+        elif v.anual:
+            st.caption("Un valor por año, calculado con los datos de cada día. Solo cuentan los años con al "
+                       "menos 360 días de datos, por eso el año en curso no aparece.")
         elif r.por_temporada:
             st.caption(f"Un dato por año: el promedio de {r.temporada}. Solo cuentan los años que tienen "
                        f"todos esos meses.")
@@ -711,10 +728,11 @@ def paso_serie(r: caso.Interrogatorio) -> None:
     if mensual is not None:
         with mensual:
             _tendencia_por_mes(r)
-    with original:
-        st.caption("Promedios mensuales tal como se reciben. La oscilación regular es el ciclo estacional."
-                   if not r.por_temporada else f"Valores mensuales de {r.temporada}, tal como se reciben.")
-        plotly(graficas.serie_original(r))
+    if original is not None:
+        with original:
+            st.caption("Promedios mensuales tal como se reciben. La oscilación regular es el ciclo estacional."
+                       if not r.por_temporada else f"Valores mensuales de {r.temporada}, tal como se reciben.")
+            plotly(graficas.serie_original(r))
 
     st.markdown("**Pruebas de significancia.** Una tendencia visible en la gráfica puede deberse al "
                 "azar. Cada prueba da un valor p: la probabilidad de observar una tendencia al menos "

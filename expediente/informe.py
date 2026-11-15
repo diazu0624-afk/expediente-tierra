@@ -246,6 +246,7 @@ def informe_html(
     v = r.variable
     res = veredicto.redactar(r)
     inicio, fin = r.serie.index.min(), r.serie.index.max()
+    fecha = "%Y" if r.variable.anual else "%m/%Y"
     hoy = dt.date.today()
     numero_de_seccion = iter(range(1, 20))
 
@@ -261,7 +262,7 @@ def informe_html(
         '<dl>',
         f'<dt>Variable</dt><dd>{escape(v.nombre)} ({escape(v.unidad)})</dd>',
         f'<dt>Sitio de estudio</dt><dd>{escape(sitio)}<br>Latitud {lat:.2f}°, longitud {lon:.2f}°</dd>',
-        f'<dt>Periodo analizado</dt><dd>{inicio:%m/%Y} a {fin:%m/%Y} ({r.anios_de_datos:.0f} años de datos{f"; solo {r.temporada}" if r.por_temporada else " mensuales"})</dd>',
+        f'<dt>Periodo analizado</dt><dd>{inicio:{fecha}} a {fin:{fecha}} ({r.anios_de_datos:.0f} años de datos{f"; solo {r.temporada}" if r.por_temporada else "; un valor por año" if v.anual else " mensuales"})</dd>',
         f'<dt>Tamaño de muestra</dt><dd>{escape(r.muestra)}</dd>',
         f'<dt>Fuente de datos</dt><dd>{escape(v.fuente)}</dd>',
         f'<dt>Resultado</dt><dd><strong>{escape(res.titular)}</strong></dd>',
@@ -316,9 +317,11 @@ def informe_html(
         pie = (f"Anomalías de la variable «{escape(v.nombre)}», en {escape(u)}: a cada mes se le restó su climatología "
                f"(el promedio de ese mes del año) para eliminar el ciclo estacional.")
     else:
-        leyenda = f'<span><i style="border-color:{AZUL}"></i>{"Promedio de " + r.temporada if r.por_temporada else "Promedio anual"}</span>'
+        leyenda = f'<span><i style="border-color:{AZUL}"></i>{"Promedio de " + r.temporada if r.por_temporada else "Valor de cada año" if v.anual else "Promedio anual"}</span>'
         pie = (f"Promedios de {r.temporada} de la variable «{escape(v.nombre)}», en {escape(u)}: un dato por año."
                if r.por_temporada else
+               f"Valores anuales del índice «{escape(v.nombre)}», en {escape(u)}, calculados con los datos diarios."
+               if v.anual else
                f"Promedios anuales de la variable «{escape(v.nombre)}», en {escape(u)}. Esta variable solo toma valores "
                f"parte del año, por lo que se analiza por año.")
     cuerpo += [

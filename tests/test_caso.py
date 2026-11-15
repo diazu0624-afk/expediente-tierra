@@ -312,3 +312,45 @@ def test_loess_sigue_una_curva_que_la_recta_no_puede_seguir():
     assert np.abs(curva - y).max() < 0.4 and curva[0] > curva[23] + 1.5 and curva[-1] > curva[23] + 1.5
     # Sobre una recta exacta, la regresión local la reproduce.
     assert np.allclose(est.loess(x, 2 + 0.3 * x, 0.5), 2 + 0.3 * x)
+
+
+# ---------- índices de extremos con datos diarios ----------
+
+def _diarios(anios=30, calentamiento=0.0):
+    from expediente import extremos
+    rng = np.random.default_rng(5)
+    dias = pd.date_range("1981-01-01", f"{1980 + anios}-12-31", freq="D")
+    ciclo = 10 * np.sin(2 * np.pi * (dias.dayofyear - 105) / 365.25)
+    maxima = 25 + ciclo + rng.normal(0, 2, dias.size) + calentamiento * (dias.year - 1981)
+    lluvia = np.where(rng.random(dias.size) < 0.2, rng.gamma(1.5, 8, dias.size), 0.0)
+    return extremos, pd.DataFrame({"T2M_MAX": maxima, "T2M_MIN": maxima - 12, "PRECTOTCORR": lluvia}, index=dias)
+
+
+def test_racha_mas_larga():
+    from expediente.extremos import racha_mas_larga
+    assert racha_mas_larga(np.array([1, 1, 0, 1, 1, 1, 0], dtype=bool)) == 3
+    assert racha_mas_larga(np.zeros(5, dtype=bool)) == 0
+
+
+def test_los_indices_de_extremos_se_calculan_como_se_definen():
+    extremos, diarios = _diarios()
+    diarios = diarios.loc[:"2010-06-30"]  # el último año queda incompleto
+    indices = extremos.indices_anuales(diarios)
+    assert list(indices.index.year) == list(range(1981, 2010))  # 2010 no cuenta: le faltan días
+    de_1990 = diarios.loc["1990"]
+    assert indices.loc["1990-07-01", "EXT_TXX"] == pytest.approx(de_1990["T2M_MAX"].max())
+    assert indices.loc["1990-07-01", "EXT_RX1"] == pytest.approx(de_1990["PRECTOTCORR"].max())
+    assert indices.loc["1990-07-01", "EXT_R10"] == (de_1990["PRECTOTCORR"] >= 10).sum()
+    assert indices.loc["1990-07-01", "EXT_DIAS_35"] == (de_1990["T2M_MAX"] > 35).sum()
+    # Sin tendencia, cerca del 10 % de los días supera el percentil 90 del periodo base.
+    assert indices["EXT_DIAS_CALOR"].mean() == pytest.approx(36.5, abs=4)
+
+
+def test_un_calentamiento_aumenta_los_dias_de_calor_y_se_detecta():
+    extremos, diarios = _diarios(anios=40, calentamiento=0.05)
+    indices = extremos.indices_anuales(diarios)
+    r = caso.interrogar(indices["EXT_DIAS_CALOR"], POR_CODIGO["EXT_DIAS_CALOR"])
+    assert r.resolucion == "anual" and not r.por_temporada and r.sube and r.nivel in ("solida", "fuerte")
+    assert r.n == 40 and "años" in r.muestra
+    with pytest.raises(caso.CasoImposible):
+        caso.interrogar(indices["EXT_DIAS_CALOR"], POR_CODIGO["EXT_DIAS_CALOR"], (6, 7, 8))

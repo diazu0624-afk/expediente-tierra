@@ -144,7 +144,8 @@ def tendencia(r: Interrogatorio) -> go.Figure:
                         hovertemplate="12 meses alrededor de %{x|%b %Y}: %{y:+.2f} " + u + "<extra></extra>")
     else:
         fig.add_scatter(x=x, y=r.anual, mode="lines+markers", legendrank=2,
-                        name=f"Promedio de {r.temporada}" if r.por_temporada else "Promedio anual",
+                        name=(f"Promedio de {r.temporada}" if r.por_temporada
+                              else "Valor de cada año" if r.variable.anual else "Promedio anual"),
                         line=dict(color=AZUL, width=2),
                         marker=dict(size=8, color=AZUL, line=dict(color=SUPERFICIE, width=2)),
                         hovertemplate="%{x}: %{y:.2f} " + u + "<extra></extra>")

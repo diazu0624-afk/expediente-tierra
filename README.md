@@ -159,10 +159,11 @@ expediente-tierra/
 │   └── demo.html               Recorrido animado (lo genera expediente/demo.py)
 ├── expediente/                 Lógica de la aplicación (sin Streamlit)
 │   ├── __init__.py
-│   ├── variables.py            Catálogo de 37 variables y 34 referencias con DOI
+│   ├── variables.py            Catálogo de 45 variables y 35 referencias con DOI
 │   ├── datos.py                NASA POWER (punto y región), geocodificador y caché
 │   ├── datos_gee.py            Google Earth Engine: 11 variables de satélites y modelos
 │   ├── sitio.py                Todas las variables de un punto; regla tierra/mar
+│   ├── extremos.py             Índices anuales de extremos con datos diarios de POWER
 │   ├── estadistica.py          Motor estadístico: pruebas, estimadores, bootstrap
 │   ├── caso.py                 Exploración de variables y análisis de una serie
 │   ├── region.py               Mapa de tendencias por celda y promedio regional
@@ -172,7 +173,7 @@ expediente-tierra/
 │   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
-│   └── test_caso.py            28 pruebas: análisis, región, informe, tierra/mar y temporadas
+│   └── test_caso.py            31 pruebas: análisis, región, informe, tierra/mar, temporadas y extremos
 ├── validacion/                 Simulaciones de Monte Carlo y filtro de calidad de datos
 │   ├── calibracion.py          Falsos positivos y potencia de cada prueba
 │   ├── veredictos.py           Falsos positivos y potencia del resultado completo
@@ -353,6 +354,29 @@ descriptiva: muestra si el cambio se aceleró, se frenó o se invirtió, sin ent
 **Tamaños de muestra.** `Interrogatorio.n` y `Interrogatorio.muestra` dan el tamaño de muestra
 de cada análisis; `escanear` devuelve los años de cada variable (`anios`) y
 `mapa_de_tendencias` los de cada celda. La interfaz los muestra junto a cada resultado.
+
+### 6.2.2 Índices de extremos con datos diarios (`extremos.py`)
+
+Un promedio mensual esconde los días extremos. `extremos.descargar_diarios` baja la temperatura
+máxima, la mínima y la precipitación de cada día del punto (API diaria de NASA POWER, unos dos
+segundos para 45 años) e `indices_anuales` resume cada año en ocho índices con las definiciones
+del ETCCDI (Zhang et al., 2011):
+
+| Código | Índice | Definición |
+|---|---|---|
+| `EXT_TXX` | Día más caluroso del año | Máximo anual de la temperatura máxima diaria (TXx) |
+| `EXT_TNN` | Noche más fría del año | Mínimo anual de la temperatura mínima diaria (TNn) |
+| `EXT_DIAS_CALOR` | Días de calor extremo para el lugar | Días con máxima sobre el percentil 90 local de 1981-2010 |
+| `EXT_DIAS_35` | Días con más de 35 °C | Días con máxima superior a 35 °C |
+| `EXT_NOCHES_20` | Noches tropicales | Días con mínima superior a 20 °C (TR) |
+| `EXT_RX1` | Lluvia máxima en un día | Máximo anual de la precipitación diaria (Rx1day) |
+| `EXT_R10` | Días con lluvia fuerte | Días con 10 mm o más (R10mm) |
+| `EXT_CDD` | Racha seca más larga | Máximo de días seguidos con menos de 1 mm (CDD) |
+
+Solo cuentan los años con al menos 360 días de datos. Cada índice entra al catálogo como una
+variable de origen `"diario"` con un valor por año (fechado el 1 de julio), y pasa por las
+mismas cinco pruebas a resolución anual. No tienen mapa regional ni análisis por temporada: la
+API regional de POWER no entrega datos diarios y los índices son anuales por definición.
 
 ### 6.3 Exploración de variables (`caso.escanear`)
 
@@ -555,6 +579,7 @@ Archivos de `cache_power/`:
 |---|---|
 | `power_{lat}_{lon}_{inicio}_{fin}_{huella}.csv` | Punto. La huella identifica la lista de variables |
 | `region_{codigo}_{caja}_{inicio}_{fin}.csv` | Región de reanálisis |
+| `diario_{lat}_{lon}_{inicio}_{fin}.csv` | Punto: temperatura máxima, mínima y precipitación de cada día |
 | `gee_{codigo}_{caja}.csv` | Región de satélite, siempre de 10° |
 | `descargas.json` | Fecha de descarga de cada archivo |
 
@@ -607,7 +632,7 @@ Antes de entrar al catálogo, cada variable se evalúa en siete sitios
 
 ```bash
 .venv/bin/pip install pytest pymannkendall
-.venv/bin/python -m pytest                   # 53 pruebas
+.venv/bin/python -m pytest                   # 56 pruebas
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del resultado completo
 .venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas

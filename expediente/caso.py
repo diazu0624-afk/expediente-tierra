@@ -114,9 +114,18 @@ def serie_de_temporada(serie: pd.Series, meses: tuple[int, ...]) -> pd.Series:
     return por_anio.mean()[por_anio.count() == len(meses)]
 
 
-def serie_anual(serie: pd.Series, meses: tuple[int, ...] = TODO_EL_ANIO) -> pd.Series:
-    """Un valor por año, de todo el año o solo de los meses elegidos."""
+def serie_anual(serie: pd.Series, meses: tuple[int, ...] = TODO_EL_ANIO, ya_es_anual: bool = False) -> pd.Series:
+    """Un valor por año, de todo el año o solo de los meses elegidos.
+
+    `ya_es_anual` es para los índices de extremos, que traen un solo valor por año.
+    """
+    if ya_es_anual:
+        serie = serie.dropna()
+        return serie.groupby(serie.index.year).mean()
     return promedios_anuales(serie) if len(meses) == 12 else serie_de_temporada(serie, meses)
+
+
+SOLO_ANUAL = "Es un índice anual: no se calcula por temporada"
 
 
 def _parte_repetida(serie: pd.Series) -> float:
@@ -260,9 +269,11 @@ def interrogar(serie_mensual: pd.Series, variable: Variable,
     """
     serie = serie_mensual.loc[str(variable.desde):].dropna()
     por_temporada = len(meses) < 12
+    if por_temporada and variable.anual:
+        raise CasoImposible(SOLO_ANUAL + ". Elige «Todo el año» en la barra lateral.")
     if por_temporada:
         serie = serie[serie.index.month.isin(meses)]
-    anual = serie_anual(serie, meses)
+    anual = serie_anual(serie, meses, variable.anual)
     motivo = _motivo_imposible(anual)
     if motivo:
         raise CasoImposible(motivo + ".")
@@ -271,7 +282,7 @@ def interrogar(serie_mensual: pd.Series, variable: Variable,
     anios = anual.index.to_numpy(dtype=float)
     # Fenómenos que solo ocurren parte del año (nieve, heladas) llenan la serie mensual de
     # ceros repetidos; para esos se interroga el promedio anual.
-    mensual = not por_temporada and _parte_repetida(serie) <= MAX_REPETIDOS
+    mensual = not por_temporada and not variable.anual and _parte_repetida(serie) <= MAX_REPETIDOS
     if mensual:
         t = np.asarray(anomalias.index.year + (anomalias.index.month - 0.5) / 12, dtype=float)
         y = anomalias.to_numpy()
@@ -417,11 +428,11 @@ def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO,
                 "unidad": v.unidad, "anios": 0, "pendiente_decada": np.nan,
                 "estandarizada": np.nan, "p": np.nan, "nota": ""}
         if v.codigo in datos:
-            anual = serie_anual(datos[v.codigo].loc[str(v.desde):].dropna(), meses)
+            anual = serie_anual(datos[v.codigo].loc[str(v.desde):].dropna(), meses, v.anual)
         else:
             anual = pd.Series(dtype=float)
         fila["anios"] = len(anual)
-        fila["nota"] = _motivo_imposible(anual)
+        fila["nota"] = SOLO_ANUAL if v.anual and len(meses) < 12 else _motivo_imposible(anual)
         if not fila["nota"]:
             anios, valores = anual.index.to_numpy(dtype=float), anual.to_numpy()
             recta = est.regresion_lineal(anios, valores)
