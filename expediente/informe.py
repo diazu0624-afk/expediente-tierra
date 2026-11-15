@@ -183,8 +183,9 @@ main { max-width: 46rem; margin: 0 auto; padding: 0 1.25rem 3rem; }
 h1, h2, h3 { font-family: 'Inter', system-ui, sans-serif; letter-spacing: -0.02em; margin: 0; }
 .mono, .etiqueta, .eje, th.n { font-family: 'DM Mono', ui-monospace, Menlo, monospace; }
 .etiqueta { font-size: 7.5pt; letter-spacing: .1em; text-transform: uppercase; color: var(--tinta2); }
-.portada { min-height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 3rem 0 2.5rem;
-  page-break-after: always; break-after: page; }
+/* En pantalla, el título y los datos del informe van juntos. Solo al imprimir la portada
+   ocupa una hoja propia, con el título arriba y los datos al pie. */
+.portada { display: flex; flex-direction: column; gap: 2.2rem; padding: 3rem 0 .5rem; }
 .portada h1 { font-weight: 800; font-size: 34pt; line-height: 1.04; letter-spacing: -0.035em; margin: .6rem 0 .8rem; }
 .portada .sub { font-size: 14pt; line-height: 1.35; max-width: 34rem; }
 .portada dl { display: grid; grid-template-columns: 11rem 1fr; gap: .45rem 1rem; margin: 0; padding-top: 1rem; border-top: 2px solid var(--tinta); }
@@ -222,7 +223,7 @@ ol.referencias { font-size: 8.8pt; line-height: 1.45; }
 ol.referencias li { break-inside: avoid; }
 a { color: #0b3d91; word-break: break-all; }
 footer { margin-top: 2.5rem; padding-top: .6rem; border-top: 1px solid var(--filete); font-size: 8pt; color: var(--tinta2); }
-@media print { main { max-width: none; padding: 0; } .portada { min-height: 0; height: 235mm; padding: 0; } a { color: var(--tinta); } }
+@media print { main { max-width: none; padding: 0; } .portada { height: 235mm; padding: 0; justify-content: space-between; page-break-after: always; break-after: page; } a { color: var(--tinta); } }
 """
 
 
