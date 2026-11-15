@@ -261,7 +261,8 @@ def informe_html(
         '<dl>',
         f'<dt>Variable</dt><dd>{escape(v.nombre)} ({escape(v.unidad)})</dd>',
         f'<dt>Sitio de estudio</dt><dd>{escape(sitio)}<br>Latitud {lat:.2f}°, longitud {lon:.2f}°</dd>',
-        f'<dt>Periodo analizado</dt><dd>{inicio:%m/%Y} a {fin:%m/%Y} ({r.anios_de_datos:.0f} años de datos mensuales)</dd>',
+        f'<dt>Periodo analizado</dt><dd>{inicio:%m/%Y} a {fin:%m/%Y} ({r.anios_de_datos:.0f} años de datos{f"; solo {r.temporada}" if r.por_temporada else " mensuales"})</dd>',
+        f'<dt>Tamaño de muestra</dt><dd>{escape(r.muestra)}</dd>',
         f'<dt>Fuente de datos</dt><dd>{escape(v.fuente)}</dd>',
         f'<dt>Resultado</dt><dd><strong>{escape(res.titular)}</strong></dd>',
         f'<dt>Fecha del informe</dt><dd>{hoy:%d/%m/%Y}'
@@ -315,8 +316,10 @@ def informe_html(
         pie = (f"Anomalías de la variable «{escape(v.nombre)}», en {escape(u)}: a cada mes se le restó su climatología "
                f"(el promedio de ese mes del año) para eliminar el ciclo estacional.")
     else:
-        leyenda = f'<span><i style="border-color:{AZUL}"></i>Promedio anual</span>'
-        pie = (f"Promedios anuales de la variable «{escape(v.nombre)}», en {escape(u)}. Esta variable solo toma valores "
+        leyenda = f'<span><i style="border-color:{AZUL}"></i>{"Promedio de " + r.temporada if r.por_temporada else "Promedio anual"}</span>'
+        pie = (f"Promedios de {r.temporada} de la variable «{escape(v.nombre)}», en {escape(u)}: un dato por año."
+               if r.por_temporada else
+               f"Promedios anuales de la variable «{escape(v.nombre)}», en {escape(u)}. Esta variable solo toma valores "
                f"parte del año, por lo que se analiza por año.")
     cuerpo += [
         seccion("Serie de tiempo"),

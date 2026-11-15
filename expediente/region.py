@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from . import estadistica as est
-from .caso import _motivo_imposible, promedios_anuales
+from .caso import TODO_EL_ANIO, _motivo_imposible, serie_anual
 from .variables import Variable
 
 
@@ -31,10 +31,12 @@ def promedio_regional(cubo: pd.DataFrame) -> pd.Series:
                      index=cubo.index).dropna()
 
 
-def mapa_de_tendencias(cubo: pd.DataFrame, variable: Variable) -> pd.DataFrame:
-    """Tendencia de cada celda de la región, con promedios anuales.
+def mapa_de_tendencias(cubo: pd.DataFrame, variable: Variable,
+                       meses: tuple[int, ...] = TODO_EL_ANIO) -> pd.DataFrame:
+    """Tendencia de cada celda de la región, con un valor por año (o por temporada).
 
-    Columnas: lat, lon, pendiente_decada, p, p_ajustada, significativa. Como se prueban
+    Columnas: lat, lon, anios (tamaño de muestra de la celda), pendiente_decada, p,
+    p_ajustada, significativa. Como se prueban
     cientos de celdas a la vez, los valores p se ajustan con Benjamini-Hochberg. Las
     celdas donde la variable no se puede medir (p. ej. humedad del suelo en el mar)
     quedan fuera.
@@ -42,14 +44,14 @@ def mapa_de_tendencias(cubo: pd.DataFrame, variable: Variable) -> pd.DataFrame:
     lats, lons = _coordenadas(cubo)
     filas = []
     for columna, lat, lon in zip(cubo.columns, lats, lons):
-        anual = promedios_anuales(cubo[columna].loc[str(variable.desde):].dropna())
+        anual = serie_anual(cubo[columna].loc[str(variable.desde):].dropna(), meses)
         if _motivo_imposible(anual):
             continue
         anios, valores = anual.index.to_numpy(dtype=float), anual.to_numpy()
         recta = est.regresion_lineal(anios, valores)
         mk = est.mann_kendall_sin_memoria(anios, valores)
-        filas.append((lat, lon, recta.pendiente * 10, mk.prueba.p))
-    tabla = pd.DataFrame(filas, columns=["lat", "lon", "pendiente_decada", "p"])
+        filas.append((lat, lon, len(anual), recta.pendiente * 10, mk.prueba.p))
+    tabla = pd.DataFrame(filas, columns=["lat", "lon", "anios", "pendiente_decada", "p"])
     tabla["p_ajustada"] = est.benjamini_hochberg(tabla["p"].to_numpy()) if len(tabla) else []
     tabla["significativa"] = tabla["p_ajustada"] < est.ALFA
     return tabla
@@ -58,8 +60,8 @@ def mapa_de_tendencias(cubo: pd.DataFrame, variable: Variable) -> pd.DataFrame:
 def resumen(mapa: pd.DataFrame) -> dict[str, float]:
     """Porcentaje de celdas que suben o bajan de forma significativa."""
     if mapa.empty:
-        return {"sube": 0.0, "baja": 0.0, "celdas": 0}
+        return {"sube": 0.0, "baja": 0.0, "celdas": 0, "anios_min": 0, "anios_max": 0}
     firmes = mapa[mapa["significativa"]]
     return {"sube": 100 * float((firmes["pendiente_decada"] > 0).sum()) / len(mapa),
             "baja": 100 * float((firmes["pendiente_decada"] < 0).sum()) / len(mapa),
-            "celdas": len(mapa)}
+            "celdas": len(mapa), "anios_min": int(mapa["anios"].min()), "anios_max": int(mapa["anios"].max())}

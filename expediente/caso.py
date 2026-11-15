@@ -32,6 +32,14 @@ NIVELES = {
 }
 NIVELES_CORTOS = {"solida": "Sólida", "fuerte": "Fuerte", "indicios": "Débil", "sin": "Insuficiente"}
 
+MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre",
+         "octubre", "noviembre", "diciembre")
+TODO_EL_ANIO = tuple(range(1, 13))
+# Estaciones meteorológicas, nombradas por sus meses para que sirvan en los dos hemisferios.
+TEMPORADAS: dict[str, tuple[int, ...]] = {
+    "DEF": (12, 1, 2), "MAM": (3, 4, 5), "JJA": (6, 7, 8), "SON": (9, 10, 11),
+}
+
 
 class CasoImposible(ValueError):
     """La variable no se puede analizar en este lugar (faltan datos o casi nunca ocurre)."""
@@ -64,6 +72,51 @@ def promedios_anuales(serie: pd.Series) -> pd.Series:
     anomalias, climatologia = est.quitar_ciclo_estacional(serie)
     por_anio = anomalias.groupby(anomalias.index.year)
     return (por_anio.mean() + climatologia.mean())[por_anio.count() >= MIN_MESES]
+
+
+def ordenar_meses(meses) -> tuple[int, ...]:
+    """Los meses elegidos en orden cronológico; una temporada que cruza el fin de año empieza
+    después de su hueco más largo (diciembre, enero y febrero -> 12, 1, 2)."""
+    unicos = sorted({int(m) for m in meses if 1 <= int(m) <= 12})
+    if not unicos or len(unicos) == 12:
+        return TODO_EL_ANIO
+    huecos = [(unicos[(k + 1) % len(unicos)] - m - 1) % 12 for k, m in enumerate(unicos)]
+    inicio = (int(np.argmax(huecos)) + 1) % len(unicos)
+    return tuple(unicos[inicio:] + unicos[:inicio])
+
+
+def nombre_de_meses(meses: tuple[int, ...]) -> str:
+    """Cómo se nombra una selección de meses: "todo el año", "julio", "junio a agosto"."""
+    if len(meses) == 12:
+        return "todo el año"
+    nombres = [MESES[m - 1] for m in meses]
+    if len(meses) == 1:
+        return nombres[0]
+    seguidos = all((b - a) % 12 == 1 for a, b in zip(meses, meses[1:]))
+    if seguidos:
+        return f"{nombres[0]} a {nombres[-1]}" if len(meses) > 2 else f"{nombres[0]} y {nombres[1]}"
+    return ", ".join(nombres[:-1]) + " y " + nombres[-1]
+
+
+def serie_de_temporada(serie: pd.Series, meses: tuple[int, ...]) -> pd.Series:
+    """Un valor por año: el promedio de los meses elegidos. El año solo cuenta si los tiene todos.
+
+    Una temporada que cruza el fin de año (diciembre a febrero) se asigna al año en que
+    termina: diciembre de 2019 cuenta para la temporada de 2020.
+    """
+    serie = serie.dropna()
+    serie = serie[serie.index.month.isin(meses)]
+    if serie.empty:
+        return pd.Series(dtype=float)
+    cruza = [m for k, m in enumerate(meses) if any(posterior < m for posterior in meses[k + 1:])]
+    anio = serie.index.year + np.isin(serie.index.month, cruza).astype(int)
+    por_anio = serie.groupby(anio)
+    return por_anio.mean()[por_anio.count() == len(meses)]
+
+
+def serie_anual(serie: pd.Series, meses: tuple[int, ...] = TODO_EL_ANIO) -> pd.Series:
+    """Un valor por año, de todo el año o solo de los meses elegidos."""
+    return promedios_anuales(serie) if len(meses) == 12 else serie_de_temporada(serie, meses)
 
 
 def _parte_repetida(serie: pd.Series) -> float:
@@ -107,6 +160,28 @@ class Interrogatorio:
     pruebas: tuple[Prueba, ...]
     anios_necesarios: float
     cambio: est.PuntoDeCambio | None  # regresión en dos tramos sobre los promedios anuales
+    meses: tuple[int, ...] = TODO_EL_ANIO  # meses del año que entran al análisis
+
+    @property
+    def por_temporada(self) -> bool:
+        return len(self.meses) < 12
+
+    @property
+    def temporada(self) -> str:
+        return nombre_de_meses(self.meses)
+
+    @property
+    def n(self) -> int:
+        """Tamaño de muestra: datos que entran a las pruebas."""
+        return len(self.y)
+
+    @property
+    def muestra(self) -> str:
+        """El tamaño de muestra en palabras, para mostrarlo junto a cada resultado."""
+        periodo = f"de {self.anual.index.min()} a {self.anual.index.max()}"
+        if self.resolucion == "mensual":
+            return f"n = {self.n} meses ({len(self.anual)} años completos), {periodo}"
+        return f"n = {self.n} años, {periodo}"
 
     @property
     def aprobadas(self) -> int:
@@ -176,10 +251,18 @@ def _sobrevive_sin_un_anio(anios: np.ndarray, valores: np.ndarray, signo: float)
     return fallos == 0, fallos
 
 
-def interrogar(serie_mensual: pd.Series, variable: Variable) -> Interrogatorio:
-    """Somete una variable a las cinco pruebas."""
+def interrogar(serie_mensual: pd.Series, variable: Variable,
+               meses: tuple[int, ...] = TODO_EL_ANIO) -> Interrogatorio:
+    """Somete una variable a las cinco pruebas.
+
+    Con `meses` se analiza solo una parte del año (una estación o un mes): la serie se
+    reduce a un valor por año y se interroga a esa resolución.
+    """
     serie = serie_mensual.loc[str(variable.desde):].dropna()
-    anual = promedios_anuales(serie)
+    por_temporada = len(meses) < 12
+    if por_temporada:
+        serie = serie[serie.index.month.isin(meses)]
+    anual = serie_anual(serie, meses)
     motivo = _motivo_imposible(anual)
     if motivo:
         raise CasoImposible(motivo + ".")
@@ -188,7 +271,7 @@ def interrogar(serie_mensual: pd.Series, variable: Variable) -> Interrogatorio:
     anios = anual.index.to_numpy(dtype=float)
     # Fenómenos que solo ocurren parte del año (nieve, heladas) llenan la serie mensual de
     # ceros repetidos; para esos se interroga el promedio anual.
-    mensual = _parte_repetida(serie) <= MAX_REPETIDOS
+    mensual = not por_temporada and _parte_repetida(serie) <= MAX_REPETIDOS
     if mensual:
         t = np.asarray(anomalias.index.year + (anomalias.index.month - 0.5) / 12, dtype=float)
         y = anomalias.to_numpy()
@@ -225,6 +308,7 @@ def interrogar(serie_mensual: pd.Series, variable: Variable) -> Interrogatorio:
             "¿La tendencia se mantiene si se excluye cualquier año?",
             sobrevive,
             "se mantiene al excluir cualquier año" if sobrevive
+            else "no es significativa, se excluya el año que se excluya" if fallos == len(anual)
             else f"deja de ser significativa al excluir {fallos} de {len(anual)} años",
             "Se repite la prueba de Mann-Kendall excluyendo un año a la vez (validación "
             "dejando uno fuera). Si la tendencia desaparece al excluir un solo año, dependía "
@@ -286,13 +370,43 @@ def interrogar(serie_mensual: pd.Series, variable: Variable) -> Interrogatorio:
     return Interrogatorio(variable, "mensual" if mensual else "anual", serie, anomalias, anual,
                           t, y, regresion, ic_historias, mk, est.mann_kendall(y), sen,
                           triangulo, fraccion, pruebas, necesarios,
-                          est.punto_de_cambio(anios, anual.to_numpy()))
+                          est.punto_de_cambio(anios, anual.to_numpy()), tuple(meses))
 
 
-def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO) -> pd.DataFrame:
+def tendencia_por_mes(serie_mensual: pd.Series, variable: Variable) -> pd.DataFrame:
+    """¿En qué meses del año ocurre el cambio? La tendencia de cada mes del calendario por separado.
+
+    Cada mes se analiza con un dato por año (todos los eneros, todos los febreros...).
+    Columnas: mes, nombre, n, pendiente_decada, ic_bajo, ic_alto (IC del 95 % de la pendiente,
+    con tamaño de muestra efectivo), p (Mann-Kendall sin memoria), p_ajustada
+    (Benjamini-Hochberg, porque son 12 pruebas) y significativa.
+    """
+    serie = serie_mensual.loc[str(variable.desde):].dropna()
+    filas = []
+    for mes in TODO_EL_ANIO:
+        anual = serie_de_temporada(serie, (mes,))
+        fila = {"mes": mes, "nombre": MESES[mes - 1], "n": len(anual), "pendiente_decada": np.nan,
+                "ic_bajo": np.nan, "ic_alto": np.nan, "p": np.nan}
+        if not _motivo_imposible(anual):
+            anios, valores = anual.index.to_numpy(dtype=float), anual.to_numpy()
+            recta = est.regresion_lineal(anios, valores)
+            fila.update(pendiente_decada=recta.pendiente * 10, ic_bajo=recta.ic_bajo * 10,
+                        ic_alto=recta.ic_alto * 10, p=est.mann_kendall_sin_memoria(anios, valores).prueba.p)
+        filas.append(fila)
+    tabla = pd.DataFrame(filas)
+    validas = tabla["p"].notna()
+    tabla["p_ajustada"] = np.nan
+    if validas.any():
+        tabla.loc[validas, "p_ajustada"] = est.benjamini_hochberg(tabla.loc[validas, "p"].to_numpy())
+    tabla["significativa"] = tabla["p_ajustada"] < est.ALFA
+    return tabla
+
+
+def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO,
+             meses: tuple[int, ...] = TODO_EL_ANIO) -> pd.DataFrame:
     """Exploración de variables: tendencia de cada una, en una escala comparable.
 
-    Usa promedios anuales. `estandarizada` es la pendiente por década dividida entre la
+    Usa un valor por año (de todo el año o de los `meses` elegidos). `estandarizada` es la pendiente por década dividida entre la
     variación típica de un año a otro, así que un cambio de temperatura y uno de lluvia
     se pueden poner en la misma escala. Los valores p (Mann-Kendall sin memoria) se
     ajustan con Benjamini-Hochberg porque se examinan muchas variables a la vez.
@@ -303,7 +417,7 @@ def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO) ->
                 "unidad": v.unidad, "anios": 0, "pendiente_decada": np.nan,
                 "estandarizada": np.nan, "p": np.nan, "nota": ""}
         if v.codigo in datos:
-            anual = promedios_anuales(datos[v.codigo].loc[str(v.desde):].dropna())
+            anual = serie_anual(datos[v.codigo].loc[str(v.desde):].dropna(), meses)
         else:
             anual = pd.Series(dtype=float)
         fila["anios"] = len(anual)

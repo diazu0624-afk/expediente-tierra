@@ -303,6 +303,29 @@ def anios_para_detectar(
     return (3.3 * ruido / abs(pendiente_anual)) ** (2 / 3)
 
 
+def loess(x: np.ndarray, y: np.ndarray, fraccion: float = 0.5) -> np.ndarray:
+    """Curva suavizada por regresión local (LOESS, Cleveland 1979), evaluada en cada x.
+
+    En cada punto se ajusta una recta a la `fraccion` de datos más cercana, con pesos
+    tricúbicos: los vecinos inmediatos pesan más. A diferencia de la recta global, la curva
+    puede acelerarse, frenarse o invertirse. Es descriptiva: no se le asocia un valor p.
+    """
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    n = x.size
+    k = min(n, max(3, int(np.ceil(fraccion * n))))
+    curva = np.empty(n)
+    for i in range(n):
+        distancia = np.abs(x - x[i])
+        alcance = np.partition(distancia, k - 1)[k - 1] or 1.0
+        pesos = np.clip(1 - (distancia / alcance) ** 3, 0, None) ** 3
+        dx = x - x[i]
+        sw, swx, swxx = pesos.sum(), (pesos * dx).sum(), (pesos * dx * dx).sum()
+        swy, swxy = (pesos * y).sum(), (pesos * dx * y).sum()
+        determinante = sw * swxx - swx * swx
+        # Valor de la recta local en dx = 0; si los vecinos coinciden en x, su promedio ponderado.
+        curva[i] = (swxx * swy - swx * swxy) / determinante if determinante > 1e-12 * sw * sw else swy / sw
+    return curva
+
 def benjamini_hochberg(p: np.ndarray) -> np.ndarray:
     """Valores p ajustados para controlar la tasa de descubrimientos falsos.
 

@@ -42,7 +42,7 @@ class Veredicto:
 
 def _titular(r: Interrogatorio) -> str:
     rumbo = "en aumento" if r.sube else "en descenso"
-    nombre = r.variable.nombre
+    nombre = r.variable.nombre + (f", {r.temporada}" if r.por_temporada else "")
     if r.nivel == "solida":
         return f"{nombre}: {rumbo}, con evidencia sólida"
     if r.nivel == "fuerte":
@@ -150,9 +150,11 @@ def aviso_no_lineal(r: Interrogatorio) -> str:
 def ficha_tecnica(r: Interrogatorio) -> list[tuple[str, str]]:
     """Diseño del análisis, en el formato que se pide al reportar significancia estadística."""
     inicio, fin = r.serie.index.min(), r.serie.index.max()
-    datos = "anomalías mensuales" if r.resolucion == "mensual" else "promedios anuales"
+    datos = ("anomalías mensuales" if r.resolucion == "mensual"
+             else f"promedios de {r.temporada} (uno por año)" if r.por_temporada else "promedios anuales")
     return [
         ("Periodo", f"{inicio:%m/%Y} a {fin:%m/%Y}"),
+        ("Meses analizados", r.temporada.capitalize()),
         ("Tamaño de muestra", f"{r.regresion.n} {datos}; tamaño efectivo de {r.regresion.n_efectivo:.0f} "
                               f"tras descontar la autocorrelación (r₁ = {max(r.regresion.r1, 0):.2f})"),
         ("Tasa de cambio", "Pendiente de una regresión lineal por mínimos cuadrados"),

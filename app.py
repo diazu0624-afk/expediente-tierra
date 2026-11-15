@@ -180,6 +180,7 @@ def cargar_datos(lat: float, lon: float) -> pd.DataFrame:
 
 
 Periodo = tuple[int, int]  # (año inicial, año final), ambos incluidos
+Meses = tuple[int, ...]  # meses del año que entran al análisis; los 12 = todo el año
 
 
 def _recortar(tabla: pd.DataFrame, periodo: Periodo) -> pd.DataFrame:
@@ -187,13 +188,14 @@ def _recortar(tabla: pd.DataFrame, periodo: Periodo) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def cargar_exploracion(lat: float, lon: float, periodo: Periodo) -> pd.DataFrame:
-    return caso.escanear(_recortar(cargar_datos(lat, lon), periodo))
+def cargar_exploracion(lat: float, lon: float, periodo: Periodo, meses: Meses = caso.TODO_EL_ANIO) -> pd.DataFrame:
+    return caso.escanear(_recortar(cargar_datos(lat, lon), periodo), meses=meses)
 
 
 @st.cache_data(show_spinner=False)
-def cargar_analisis(lat: float, lon: float, codigo: str, periodo: Periodo) -> caso.Interrogatorio:
-    return caso.interrogar(_recortar(cargar_datos(lat, lon), periodo)[codigo], POR_CODIGO[codigo])
+def cargar_analisis(lat: float, lon: float, codigo: str, periodo: Periodo,
+                    meses: Meses = caso.TODO_EL_ANIO) -> caso.Interrogatorio:
+    return caso.interrogar(_recortar(cargar_datos(lat, lon), periodo)[codigo], POR_CODIGO[codigo], meses)
 
 
 @st.cache_data(show_spinner=False)
@@ -204,21 +206,23 @@ def cargar_region(lat: float, lon: float, codigo: str, lado: int) -> pd.DataFram
 
 
 @st.cache_data(show_spinner=False)
-def cargar_mapa(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo) -> pd.DataFrame:
-    return region.mapa_de_tendencias(_recortar(cargar_region(lat, lon, codigo, lado), periodo), POR_CODIGO[codigo])
+def cargar_mapa(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo,
+                meses: Meses = caso.TODO_EL_ANIO) -> pd.DataFrame:
+    return region.mapa_de_tendencias(_recortar(cargar_region(lat, lon, codigo, lado), periodo), POR_CODIGO[codigo], meses)
 
 
 @st.cache_data(show_spinner=False)
 def cargar_analisis_celda(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo,
-                          celda: str) -> caso.Interrogatorio:
+                          celda: str, meses: Meses = caso.TODO_EL_ANIO) -> caso.Interrogatorio:
     cubo = _recortar(cargar_region(lat, lon, codigo, lado), periodo)
-    return caso.interrogar(cubo[celda], POR_CODIGO[codigo])
+    return caso.interrogar(cubo[celda], POR_CODIGO[codigo], meses)
 
 
 @st.cache_data(show_spinner=False)
-def cargar_analisis_regional(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo) -> caso.Interrogatorio:
+def cargar_analisis_regional(lat: float, lon: float, codigo: str, lado: int, periodo: Periodo,
+                             meses: Meses = caso.TODO_EL_ANIO) -> caso.Interrogatorio:
     promedio = region.promedio_regional(_recortar(cargar_region(lat, lon, codigo, lado), periodo))
-    return caso.interrogar(promedio, POR_CODIGO[codigo])
+    return caso.interrogar(promedio, POR_CODIGO[codigo], meses)
 
 
 def elegir_periodo() -> Periodo | None:
@@ -238,6 +242,35 @@ def elegir_periodo() -> Periodo | None:
         barra.warning(f"Elige al menos {caso.MIN_ANIOS} años: con menos no se puede evaluar una tendencia.")
         return None
     return periodo
+
+
+OPCIONES_DE_MESES: dict[str, Meses | None] = {
+    "Todo el año": caso.TODO_EL_ANIO,
+    "Diciembre a febrero": caso.TEMPORADAS["DEF"],
+    "Marzo a mayo": caso.TEMPORADAS["MAM"],
+    "Junio a agosto": caso.TEMPORADAS["JJA"],
+    "Septiembre a noviembre": caso.TEMPORADAS["SON"],
+    "Elegir los meses": None,
+}
+
+
+def elegir_meses() -> Meses:
+    """Barra lateral: qué meses del año entran al análisis (todo el año, una estación o meses sueltos)."""
+    barra = st.sidebar
+    barra.markdown("**Meses del año**")
+    pedidos = caso.ordenar_meses(m for m in _parametro("meses").split(",") if m.strip().isdigit() and 1 <= int(m) <= 12)
+    nombres = list(OPCIONES_DE_MESES)
+    inicial = next((k for k, (_, meses) in enumerate(OPCIONES_DE_MESES.items()) if meses == pedidos), len(nombres) - 1)
+    eleccion = barra.selectbox("Meses del año", nombres, index=inicial, label_visibility="collapsed")
+    meses = OPCIONES_DE_MESES[eleccion]
+    if meses is None:
+        elegidos = barra.multiselect("Meses", caso.TODO_EL_ANIO, default=pedidos if len(pedidos) < 12 else (6, 7, 8, 9),
+                                     format_func=lambda m: caso.MESES[m - 1].capitalize(), label_visibility="collapsed")
+        meses = caso.ordenar_meses(elegidos)
+    barra.caption("Una tendencia puede concentrarse en una parte del año: la temporada de lluvias, el "
+                  "invierno, un mes. Al elegir una estación o unos meses, el análisis usa un dato por "
+                  "año: el promedio de esos meses.")
+    return meses
 
 
 @st.cache_data(show_spinner=False)
@@ -492,19 +525,23 @@ def paso_sitio(sitio: dict, tabla_datos: pd.DataFrame) -> None:
     mapa.map(pd.DataFrame({"lat": [sitio["lat"]], "lon": [sitio["lon"]]}), zoom=3, height=220)
 
 
-def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = ()) -> str | None:
+def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = (),
+                     meses: Meses = caso.TODO_EL_ANIO) -> str | None:
     seccion(2, "Exploración de variables")
     validas = exploracion.dropna(subset=["estandarizada"])
     firmes = int(validas["significativa"].sum())
+    temporada = f", solo con los meses de {caso.nombre_de_meses(meses)}" if len(meses) < 12 else ""
     st.markdown(
-        f"Se calculó la tendencia de **{len(validas)} variables** en este sitio. Para comparar "
+        f"Se calculó la tendencia de **{len(validas)} variables** en este sitio{temporada}. Para comparar "
         f"variables con unidades distintas, cada tendencia se divide entre la variabilidad "
         f"interanual de esa variable. **{firmes}** tienen una tendencia significativa en esta "
         f"primera revisión. Pasa el cursor sobre una barra para ver la definición de la variable."
     )
     plotly(graficas.exploracion(exploracion))
-    st.caption("Al evaluar muchas variables a la vez aumenta la probabilidad de falsos positivos. "
-               "Por eso los valores p se ajustan con el procedimiento de Benjamini-Hochberg.")
+    st.caption("Junto a cada variable está su tamaño de muestra (n, en años con datos completos): una "
+               "tendencia de 19 años no pesa lo mismo que una de 45. Al evaluar muchas variables a la vez "
+               "aumenta la probabilidad de falsos positivos; por eso los valores p se ajustan con el "
+               "procedimiento de Benjamini-Hochberg.")
     with st.expander("Ver como tabla"):
         vista = exploracion.assign(
             tendencia=exploracion["significativa"].map({True: "significativa", False: "no significativa"})
@@ -517,7 +554,7 @@ def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = ()
             hide_index=True, width="stretch",
             column_config={
                 "nombre": "Variable", "definicion": st.column_config.TextColumn("Definición", width="large"),
-                "unidad": "Unidad", "anios": "Años",
+                "unidad": "Unidad", "anios": "n (años)",
                 "pendiente_decada": st.column_config.NumberColumn("Cambio por década", format="%.3g"),
                 "estandarizada": st.column_config.NumberColumn("Tendencia estandarizada", format="%+.2f"),
                 "p_ajustada": st.column_config.NumberColumn("p ajustada", format="%.3f"),
@@ -542,7 +579,8 @@ def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = ()
     return codigo
 
 
-def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> tuple[int, str, str | None] | None:
+def paso_mapa(sitio: dict, codigo: str, periodo: Periodo,
+              meses: Meses = caso.TODO_EL_ANIO) -> tuple[int, str, str | None] | None:
     """Distribución espacial de la tendencia.
 
     Devuelve (lado del recuadro, serie que se analiza, celda elegida) o None si no hay mapa.
@@ -553,7 +591,7 @@ def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> tuple[int, str, str
                      help="Un grado equivale a unos 111 km. La NASA entrega recuadros de 2° a 10°.")
     try:
         with st.spinner("Descargando los datos de la región..."):
-            mapa = cargar_mapa(sitio["lat"], sitio["lon"], codigo, lado, periodo)
+            mapa = cargar_mapa(sitio["lat"], sitio["lon"], codigo, lado, periodo, meses)
     except datos.ErrorDeDatos as error:
         st.warning(f"No se pudo cargar el mapa de la región. {error}")
         return None
@@ -567,8 +605,12 @@ def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> tuple[int, str, str
     if r["sube"] >= 5 and r["baja"] >= 5:
         texto += " **La misma variable presenta tendencias opuestas dentro de la región.**"
     st.markdown(texto)
+    anios = (f"{r['anios_min']} años" if r["anios_min"] == r["anios_max"]
+             else f"entre {r['anios_min']} y {r['anios_max']} años")
     st.caption(f"Recuadro de {lado}° × {lado}° (unos {lado * 111:,} km de lado): latitud {lat_min:g}° a {lat_max:g}°, "
-               f"longitud {lon_min:g}° a {lon_max:g}°. Resolución espacial de esta variable: {v.resolucion}.")
+               f"longitud {lon_min:g}° a {lon_max:g}°. Resolución espacial de esta variable: {v.resolucion}. "
+               f"Tamaño de muestra: {r['celdas']} celdas, cada una con {anios} de datos"
+               + (f" de {caso.nombre_de_meses(meses)}." if len(meses) < 12 else "."))
 
     alcance = st.radio("Serie que se analiza", ["El punto", "El promedio de la región", "Una celda del mapa"],
                        horizontal=True)
@@ -588,12 +630,51 @@ def paso_mapa(sitio: dict, codigo: str, periodo: Periodo) -> tuple[int, str, str
                "de suelo sobre el mar).")
     with st.expander("Ver como tabla"):
         st.dataframe(mapa, hide_index=True, width="stretch", column_config={
-            "lat": "Latitud", "lon": "Longitud",
+            "lat": "Latitud", "lon": "Longitud", "anios": "n (años)",
             "pendiente_decada": st.column_config.NumberColumn(f"Cambio por década ({v.unidad})", format="%.3g"),
             "p": st.column_config.NumberColumn("p", format="%.3f"),
             "p_ajustada": st.column_config.NumberColumn("p ajustada", format="%.3f"),
             "significativa": "Significativa"})
     return lado, alcance, celda
+
+
+def _tendencia_por_mes(r: caso.Interrogatorio) -> None:
+    """¿En qué meses del año ocurre el cambio? Una tendencia por cada mes del calendario."""
+    u = r.variable.unidad
+    tabla = caso.tendencia_por_mes(r.serie, r.variable)
+    validas = tabla.dropna(subset=["pendiente_decada"])
+    if validas.empty:
+        st.info("No hay suficientes años de datos para analizar cada mes por separado.")
+        return
+    firmes = validas[validas["significativa"]]
+    mayor = validas.loc[validas["pendiente_decada"].abs().idxmax()]
+    if firmes.empty:
+        resumen = "Ningún mes tiene, por sí solo, una tendencia significativa."
+    elif len(firmes) == len(validas):
+        resumen = f"La tendencia es significativa en los {len(validas)} meses analizados."
+    else:
+        resumen = (f"La tendencia es significativa en {len(firmes)} de {len(validas)} meses: "
+                   f"{', '.join(firmes['nombre'])}.")
+    fuera = tabla[tabla["pendiente_decada"].isna()]["nombre"]
+    sin_analizar = (f" No se analiza {', '.join(fuera)}: faltan años de datos o el valor casi nunca cambia "
+                    f"en ese mes." if len(fuera) else "")
+    st.markdown(f"{resumen} El mayor cambio ocurre en **{mayor['nombre']}**: "
+                f"{caso.numero(mayor['pendiente_decada'], signo=True)} {u} por década.{sin_analizar}")
+    plotly(graficas.por_mes(tabla, u))
+    st.caption(f"Cada barra es la tendencia de un mes del calendario, calculada con un dato por año "
+               f"(n = {int(validas['n'].min())} a {int(validas['n'].max())} años). La línea vertical es el intervalo de "
+               f"confianza del 95 %. La significancia (Mann-Kendall con preblanqueo) se ajustó con "
+               f"Benjamini-Hochberg por tratarse de 12 pruebas. Para analizar a fondo una temporada, elígela "
+               f"en «Meses del año», en la barra lateral.")
+    with st.expander("Ver como tabla"):
+        st.dataframe(tabla[["nombre", "n", "pendiente_decada", "ic_bajo", "ic_alto", "p_ajustada", "significativa"]],
+                     hide_index=True, width="stretch", column_config={
+            "nombre": "Mes", "n": "n (años)",
+            "pendiente_decada": st.column_config.NumberColumn(f"Cambio por década ({u})", format="%+.3g"),
+            "ic_bajo": st.column_config.NumberColumn("IC 95 %, inferior", format="%+.3g"),
+            "ic_alto": st.column_config.NumberColumn("IC 95 %, superior", format="%+.3g"),
+            "p_ajustada": st.column_config.NumberColumn("p ajustada", format="%.3f"),
+            "significativa": "Significativa"})
 
 
 def paso_serie(r: caso.Interrogatorio) -> None:
@@ -605,17 +686,34 @@ def paso_serie(r: caso.Interrogatorio) -> None:
     if v.aviso:
         st.caption(v.aviso)
 
-    con_tendencia, original = st.tabs(["Anomalías y tendencia", "Serie original"])
+    st.markdown(f"**Tamaño de muestra.** {r.muestra}. Tamaño efectivo tras descontar la "
+                f"autocorrelación: {r.regresion.n_efectivo:.0f}.")
+    if r.por_temporada:
+        con_tendencia, original = st.tabs([f"Tendencia de {r.temporada}", "Serie original"])
+        mensual = None
+    else:
+        con_tendencia, mensual, original = st.tabs(["Anomalías y tendencia", "Tendencia por mes del año", "Serie original"])
     with con_tendencia:
         if r.resolucion == "mensual":
             st.caption("A cada mes se le restó su climatología (el promedio de ese mes del año). "
                        "Así se elimina el ciclo estacional y queda la variación de fondo.")
+        elif r.por_temporada:
+            st.caption(f"Un dato por año: el promedio de {r.temporada}. Solo cuentan los años que tienen "
+                       f"todos esos meses.")
         else:
             st.caption("Esta variable solo toma valores parte del año, así que se analizan los "
                        "promedios anuales.")
         plotly(graficas.tendencia(r))
+        st.caption(f"La curva punteada es una regresión local (LOESS, con el {100 * graficas.FRACCION_LOESS:.0f} % "
+                   f"de los datos más cercanos a cada punto): muestra la forma del cambio sin suponer que es "
+                   f"una recta. Donde se separa de la tendencia lineal, el cambio no fue constante. Es "
+                   f"descriptiva y no cuenta entre las pruebas.")
+    if mensual is not None:
+        with mensual:
+            _tendencia_por_mes(r)
     with original:
-        st.caption("Promedios mensuales tal como se reciben. La oscilación regular es el ciclo estacional.")
+        st.caption("Promedios mensuales tal como se reciben. La oscilación regular es el ciclo estacional."
+                   if not r.por_temporada else f"Valores mensuales de {r.temporada}, tal como se reciben.")
         plotly(graficas.serie_original(r))
 
     st.markdown("**Pruebas de significancia.** Una tendencia visible en la gráfica puede deberse al "
@@ -681,7 +779,8 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
         cifra(b, "Cambio acumulado", caso.numero(r.cambio_total, signo=True), f"{u} en {r.anios_de_datos:.0f} años")
         cifra(c, "Pruebas superadas", f"{r.aprobadas}/{caso.N_PRUEBAS}", "pruebas de significancia")
         cifra(d, "Nivel de evidencia", caso.NIVELES_CORTOS[r.nivel], "")
-        st.markdown(f"**Sitio.** {sitio['nombre']}.  \n**Tasa de cambio.** {v.cuanto}  \n"
+        st.markdown(f"**Sitio.** {sitio['nombre']}.  \n**Tamaño de muestra.** {r.muestra}"
+                    + (f"; solo {r.temporada}" if r.por_temporada else "") + f".  \n**Tasa de cambio.** {v.cuanto}  \n"
                     f"**Significancia.** {v.evidencia}")
         if v.espera:
             st.markdown(f"**Años de datos necesarios.** {v.espera}")
@@ -705,7 +804,8 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
             hipotesis=_contraste_de_hipotesis(r, hipotesis) if hipotesis else "",
             fecha_datos=datos.fecha_de_datos(sitio["lat"], sitio["lon"], [x.codigo for x in CATALOGO if x.origen == "power"]),
         ),
-        file_name=f"informe_{r.variable.codigo}_{sitio['lat']:.2f}_{sitio['lon']:.2f}.html",
+        file_name=f"informe_{r.variable.codigo}_{sitio['lat']:.2f}_{sitio['lon']:.2f}"
+                  + ("_" + "-".join(str(m) for m in r.meses) if r.por_temporada else "") + ".html",
         mime="text/html",
         icon=":material/download:",
         help="Archivo HTML: se abre en cualquier navegador y se puede imprimir o guardar como PDF.",
@@ -742,6 +842,19 @@ resultado completo alcanzó evidencia «fuerte» o «sólida» en 3 a 4 de cada 
 tendencia, y en 79 a 98 de cada 100 cuando la tendencia existía (1,500 a 2,000 series por
 escenario; el código está en la carpeta `validacion/`).
 
+**Análisis por estación o por mes.** Al elegir una parte del año, la serie se reduce a un dato
+por año (el promedio de esos meses; solo cuentan los años que los tienen todos) y se aplican las
+mismas cinco pruebas a resolución anual, la misma ruta validada con series de 19 a 45 años. La
+pestaña «Tendencia por mes del año» repite el cálculo para cada mes del calendario y ajusta los
+12 valores p con Benjamini-Hochberg.
+
+**Curva suavizada.** Regresión local LOESS (Cleveland, 1979) con la mitad de los datos más
+cercanos a cada punto. Describe la forma del cambio sin suponer una recta; no entra a las pruebas.
+
+**Tamaños de muestra.** Cada resultado indica su n: meses o años que entran a las pruebas, años
+por variable en la exploración y años por celda en el mapa. El tamaño efectivo descuenta la
+autocorrelación: n(1 − r₁)/(1 + r₁).
+
 **Años de datos necesarios para detectar una tendencia.** Fórmula de Weatherhead et al. (1998).
 
 **Cambio de comportamiento.** Regresión lineal en dos tramos sobre los promedios anuales, con
@@ -776,6 +889,7 @@ def pagina_analisis() -> None:
         return
 
     periodo = elegir_periodo()
+    meses = elegir_meses()
     encabezado("Análisis de un lugar", sitio["nombre"])
     if periodo is None:
         st.info(f"El periodo elegido es demasiado corto. Amplíalo a {caso.MIN_ANIOS} años o más en la barra lateral.")
@@ -783,14 +897,14 @@ def pagina_analisis() -> None:
     try:
         with st.spinner("Descargando los datos..."):
             tabla_datos = _recortar(cargar_datos(sitio["lat"], sitio["lon"]), periodo)
-            exploracion = cargar_exploracion(sitio["lat"], sitio["lon"], periodo)
+            exploracion = cargar_exploracion(sitio["lat"], sitio["lon"], periodo, meses)
     except datos.ErrorDeDatos as error:
         st.error(f"No se pudieron obtener los datos. {error}")
         return
 
     paso_sitio(sitio, tabla_datos)
     preferidas = tuple(TEMAS[guiado["tema"]]) if guiado else ()
-    codigo = paso_exploracion(exploracion, preferidas)
+    codigo = paso_exploracion(exploracion, preferidas, meses)
     if codigo is None:
         return
     # La hipótesis se planteó sobre la primera variable del tema; si se cambia de variable ya no aplica.
@@ -799,16 +913,16 @@ def pagina_analisis() -> None:
     hipotesis = guiado["hipotesis"] if guiado and codigo == planteada else None
 
     ejemplo, punto = sitio["nombre"], sitio  # `sitio` cambia si se analiza la región o una celda
-    espacial = paso_mapa(sitio, codigo, periodo)
+    espacial = paso_mapa(sitio, codigo, periodo, meses)
     lado, alcance, celda = espacial if espacial else (None, "El punto", None)
     try:
         if alcance == "El punto":
-            r = cargar_analisis(sitio["lat"], sitio["lon"], codigo, periodo)
+            r = cargar_analisis(sitio["lat"], sitio["lon"], codigo, periodo, meses)
         elif alcance == "El promedio de la región":
-            r = cargar_analisis_regional(sitio["lat"], sitio["lon"], codigo, lado, periodo)
+            r = cargar_analisis_regional(sitio["lat"], sitio["lon"], codigo, lado, periodo, meses)
             sitio = {**sitio, "nombre": f"Región de {lado}° × {lado}° alrededor de {sitio['nombre']}"}
         else:
-            r = cargar_analisis_celda(sitio["lat"], sitio["lon"], codigo, lado, periodo, celda)
+            r = cargar_analisis_celda(sitio["lat"], sitio["lon"], codigo, lado, periodo, celda, meses)
             lat_celda, lon_celda = (float(x) for x in celda.split(","))
             sitio = {"nombre": f"Celda en {lat_celda:.2f}°, {lon_celda:.2f}°, cerca de {sitio['nombre']}",
                      "lat": lat_celda, "lon": lon_celda}
@@ -818,7 +932,7 @@ def pagina_analisis() -> None:
     paso_serie(r)
     mapa, region_txt = None, ""
     if lado is not None:
-        mapa = cargar_mapa(punto["lat"], punto["lon"], codigo, lado, periodo)
+        mapa = cargar_mapa(punto["lat"], punto["lon"], codigo, lado, periodo, meses)
         lat_min, lat_max, lon_min, lon_max = datos.caja(punto["lat"], punto["lon"], lado)
         region_txt = (f"Recuadro de {lado}° × {lado}° alrededor de {punto['nombre']}: latitud {lat_min:g}° a "
                       f"{lat_max:g}°, longitud {lon_min:g}° a {lon_max:g}°.")
@@ -852,6 +966,7 @@ def pagina_comparacion() -> None:
         sitio_a = _sitio_a_comparar(barra, "Lugar A", 0)
         sitio_b = _sitio_a_comparar(barra, "Lugar B", 3)
     periodo = elegir_periodo()
+    meses = elegir_meses()
     if elegida == titulos[-1]:
         if sitio_a is None or sitio_b is None:
             encabezado("Comparación de dos lugares", "Elige dos lugares")
@@ -859,7 +974,7 @@ def pagina_comparacion() -> None:
             return
         try:
             with st.spinner("Descargando los datos..."):
-                validas = [cargar_exploracion(s["lat"], s["lon"], periodo or (datos.ANIO_INICIAL, dt.date.today().year)).dropna(subset=["estandarizada"])["codigo"]
+                validas = [cargar_exploracion(s["lat"], s["lon"], periodo or (datos.ANIO_INICIAL, dt.date.today().year), meses).dropna(subset=["estandarizada"])["codigo"]
                            for s in (sitio_a, sitio_b)]
         except datos.ErrorDeDatos as error:
             st.error(f"No se pudieron obtener los datos. {error}")
@@ -879,7 +994,8 @@ def pagina_comparacion() -> None:
 
     v = POR_CODIGO[codigo]
     nombre_a, nombre_b = sitio_a["nombre"], sitio_b["nombre"]
-    encabezado("Comparación de dos lugares", v.nombre, f"{nombre_a} y {nombre_b}, de {periodo[0]} a {periodo[1]}.")
+    encabezado("Comparación de dos lugares", v.nombre, f"{nombre_a} y {nombre_b}, de {periodo[0]} a {periodo[1]}"
+               + (f"; solo {caso.nombre_de_meses(meses)}." if len(meses) < 12 else "."))
     texto, definicion = st.columns([5, 2], vertical_alignment="center")
     texto.markdown(f"{v.definicion}  \nFuente: {v.fuente}.")
     definicion_emergente(definicion, v)
@@ -888,11 +1004,11 @@ def pagina_comparacion() -> None:
     try:
         with st.spinner("Analizando los dos lugares..."):
             if alcance == "El punto":
-                a = cargar_analisis(sitio_a["lat"], sitio_a["lon"], codigo, periodo)
-                b = cargar_analisis(sitio_b["lat"], sitio_b["lon"], codigo, periodo)
+                a = cargar_analisis(sitio_a["lat"], sitio_a["lon"], codigo, periodo, meses)
+                b = cargar_analisis(sitio_b["lat"], sitio_b["lon"], codigo, periodo, meses)
             else:
-                a = cargar_analisis_regional(sitio_a["lat"], sitio_a["lon"], codigo, 8, periodo)
-                b = cargar_analisis_regional(sitio_b["lat"], sitio_b["lon"], codigo, 8, periodo)
+                a = cargar_analisis_regional(sitio_a["lat"], sitio_a["lon"], codigo, 8, periodo, meses)
+                b = cargar_analisis_regional(sitio_b["lat"], sitio_b["lon"], codigo, 8, periodo, meses)
     except (caso.CasoImposible, datos.ErrorDeDatos, KeyError) as error:
         st.warning(f"No se puede hacer esta comparación: en uno de los lugares la variable no "
                    f"se puede medir. {error}")
@@ -908,15 +1024,17 @@ def pagina_comparacion() -> None:
 
     seccion(2, "Series de tiempo")
     plotly(graficas.comparacion(a, b, nombre_a, nombre_b))
-    st.caption("La curva es la media móvil de 12 meses de las anomalías (sin ciclo estacional); la "
-               "recta es la tendencia lineal. Cada lugar se compara con su propia climatología, por "
-               "eso las dos series se centran en cero aunque sus valores absolutos sean distintos.")
+    curva = (f"el promedio de {caso.nombre_de_meses(meses)} de cada año" if len(meses) < 12
+             else "la media móvil de 12 meses de las anomalías (sin ciclo estacional)")
+    st.caption(f"La curva es {curva}; la recta es la tendencia lineal. Cada lugar se compara con su propio "
+               f"promedio, por eso las dos series se centran en cero aunque sus valores absolutos sean "
+               f"distintos. Tamaño de muestra: {nombre_a}, {a.muestra}; {nombre_b}, {b.muestra}.")
 
     seccion(3, "Distribución espacial")
     mapas = []
     for sitio in (sitio_a, sitio_b):
         try:
-            mapas.append(cargar_mapa(sitio["lat"], sitio["lon"], codigo, 8, periodo))
+            mapas.append(cargar_mapa(sitio["lat"], sitio["lon"], codigo, 8, periodo, meses))
         except datos.ErrorDeDatos:
             mapas.append(pd.DataFrame())
     # Los dos mapas comparten la escala de color: el mismo tono significa el mismo cambio.
@@ -928,13 +1046,13 @@ def pagina_comparacion() -> None:
             cifra(izq, "Tasa de cambio", caso.numero(r.pendiente_decada, signo=True), f"{v.unidad} por década")
             cifra(der, "Nivel de evidencia", caso.NIVELES_CORTOS[r.nivel],
                   f"{r.aprobadas} de {caso.N_PRUEBAS} pruebas superadas")
-            st.caption(veredicto.redactar(r).cuanto)
+            st.caption(f"{veredicto.redactar(r).cuanto} Tamaño de muestra: {r.muestra}.")
             if not mapa.empty:
                 resumen = region.resumen(mapa)
                 plotly(graficas.mapa(mapa, v.unidad, sitio["lat"], sitio["lon"], tope=tope, alejar=0.4),
                        clave=f"mapa_{sitio['nombre']}")
-                st.caption(f"En la región: tendencia positiva significativa en {resumen['sube']:.0f} % "
-                           f"de las celdas y negativa en {resumen['baja']:.0f} %.")
+                st.caption(f"En la región ({resumen['celdas']} celdas): tendencia positiva significativa en "
+                           f"{resumen['sube']:.0f} % de las celdas y negativa en {resumen['baja']:.0f} %.")
     st.caption("Las cinco pruebas de significancia de cada lugar están en «Análisis de un lugar».")
     metodo()
 

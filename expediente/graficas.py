@@ -9,7 +9,9 @@ import plotly.graph_objects as go
 from . import estadistica as est
 import textwrap
 
-from .caso import Interrogatorio, numero, valor_p
+from .caso import MESES, Interrogatorio, numero, valor_p
+
+FRACCION_LOESS = 0.5  # parte de los datos que entra a cada regresión local de la curva suavizada
 from .variables import POR_CODIGO
 
 SUPERFICIE = "#ffffff"
@@ -57,8 +59,7 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
     datos = tabla.dropna(subset=["estandarizada"]).iloc[::-1]  # la más fuerte queda arriba
     # Las variables con registro más corto que el resto lo llevan en la etiqueta: una
     # tendencia de 19 años no se compara de igual a igual con una de 46.
-    mas_largo = datos["anios"].max() if len(datos) else 0
-    datos = datos.assign(etiqueta=[f"{f.nombre} · {f.anios} años" if f.anios < mas_largo else f.nombre
+    datos = datos.assign(etiqueta=[f"{f.nombre}  <span style='color:{TENUE}'>n = {f.anios}</span>"
                                    for f in datos.itertuples()])
     fig = go.Figure()
     grupos = [
@@ -71,7 +72,8 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
         g = datos[((datos["estandarizada"] > 0) == sube) & (datos["significativa"] == significativa)]
         detalle = [
             "<i>" + "<br>".join(textwrap.wrap(POR_CODIGO[f.codigo].definicion, 62)) + "</i><br><br>"
-            f"{numero(f.pendiente_decada, signo=True)} {f.unidad} por década, con {f.anios} años de datos<br>"
+            f"{numero(f.pendiente_decada, signo=True)} {f.unidad} por década<br>"
+            f"Tamaño de muestra: n = {f.anios} años<br>"
             f"{valor_p(f.p_ajustada)} (ajustado por comparar {len(datos)} variables)"
             for f in g.itertuples()
         ]
@@ -80,8 +82,8 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
             marker=dict(color=color, cornerradius=4),
             text=[f"{x:+.2f}" for x in g["estandarizada"]] if significativa else None,
             textposition="outside", textfont=dict(color=TINTA_2, size=11, family=FUENTE_CIFRAS), cliponaxis=False,
-            customdata=detalle,
-            hovertemplate="<b>%{y}</b><br>%{customdata}<br>Tendencia estandarizada: %{x:+.2f}<extra></extra>",
+            customdata=np.column_stack([g["nombre"], detalle]) if len(g) else None,
+            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Tendencia estandarizada: %{x:+.2f}<extra></extra>",
         )
     tope = float(datos["estandarizada"].abs().max()) * 1.18 if len(datos) else 1.0
     _base(fig, alto=26 * len(datos) + 110)
@@ -99,7 +101,9 @@ def serie_original(r: Interrogatorio) -> go.Figure:
     """La serie mensual tal como llega, con su vaivén de estaciones."""
     fig = go.Figure()
     fig.add_scatter(
-        x=r.serie.index, y=r.serie, mode="lines", line=dict(color=AZUL, width=1.5),
+        x=r.serie.index, y=r.serie, line=dict(color=AZUL, width=1.5),
+        # Con solo algunos meses del año, una línea uniría temporadas que no son contiguas.
+        mode="markers" if r.por_temporada else "lines", marker=dict(size=5, color=AZUL),
         hovertemplate="%{x|%b %Y}: %{y:.2f} " + r.variable.unidad + "<extra></extra>",
     )
     _base(fig, alto=300)
@@ -139,12 +143,16 @@ def tendencia(r: Interrogatorio) -> go.Figure:
                         line=dict(color=AZUL, width=2),
                         hovertemplate="12 meses alrededor de %{x|%b %Y}: %{y:+.2f} " + u + "<extra></extra>")
     else:
-        fig.add_scatter(x=x, y=r.anual, mode="lines+markers", name="Promedio anual", legendrank=2,
+        fig.add_scatter(x=x, y=r.anual, mode="lines+markers", legendrank=2,
+                        name=f"Promedio de {r.temporada}" if r.por_temporada else "Promedio anual",
                         line=dict(color=AZUL, width=2),
                         marker=dict(size=8, color=AZUL, line=dict(color=SUPERFICIE, width=2)),
                         hovertemplate="%{x}: %{y:.2f} " + u + "<extra></extra>")
     fig.add_scatter(x=x, y=recta, mode="lines", name="Tendencia lineal", legendrank=3,
                     line=dict(color=TINTA, width=2), hoverinfo="skip")
+    fig.add_scatter(x=x, y=est.loess(r.t, r.y, FRACCION_LOESS), mode="lines", legendrank=5,
+                    name="Curva suavizada (LOESS)", line=dict(color=TINTA, width=1.6, dash="dot"),
+                    hovertemplate="Curva suavizada: %{y:+.2f} " + u + "<extra></extra>")
 
     _base(fig, alto=380)
     fig.update_layout(legend_traceorder="normal")
@@ -152,7 +160,39 @@ def tendencia(r: Interrogatorio) -> go.Figure:
         fig.add_hline(y=0, line_color=EJE, line_width=1)
         fig.update_yaxes(title_text=f"Anomalía respecto a la climatología ({u})")
     else:
-        fig.update_yaxes(title_text=u)
+        fig.update_yaxes(title_text=f"Promedio de {r.temporada} ({u})" if r.por_temporada else u)
+    return fig
+
+
+def por_mes(tabla: pd.DataFrame, unidad: str) -> go.Figure:
+    """Tendencia de cada mes del año por separado, con su intervalo de confianza del 95 %."""
+    datos = tabla.dropna(subset=["pendiente_decada"])
+    fig = go.Figure()
+    grupos = [
+        ("Positiva · significativa", True, True, ROJO),
+        ("Positiva · no significativa", True, False, ROJO_CLARO),
+        ("Negativa · significativa", False, True, AZUL),
+        ("Negativa · no significativa", False, False, AZUL_CLARO),
+    ]
+    for nombre, sube, significativa, color in grupos:
+        g = datos[((datos["pendiente_decada"] > 0) == sube) & (datos["significativa"] == significativa)]
+        detalle = [f"IC 95 %: de {numero(f.ic_bajo, signo=True)} a {numero(f.ic_alto, signo=True)}<br>"
+                   f"{valor_p(f.p_ajustada)} (ajustado por comparar 12 meses)<br>n = {f.n} años"
+                   for f in g.itertuples()]
+        fig.add_bar(
+            name=nombre, x=g["mes"], y=g["pendiente_decada"], width=0.62,
+            marker=dict(color=color, cornerradius=4),
+            error_y=dict(type="data", symmetric=False, array=g["ic_alto"] - g["pendiente_decada"],
+                         arrayminus=g["pendiente_decada"] - g["ic_bajo"], color=TINTA_2, thickness=1.2, width=4),
+            customdata=np.column_stack([[MESES[m - 1].capitalize() for m in g["mes"]], detalle]) if len(g) else None,
+            hovertemplate="<b>%{customdata[0]}</b>: %{y:+.3g} " + unidad + " por década<br>%{customdata[1]}<extra></extra>",
+        )
+    _base(fig, alto=340)
+    fig.update_layout(barmode="overlay", legend_traceorder="normal")
+    fig.add_hline(y=0, line_color=EJE, line_width=1)
+    fig.update_xaxes(tickmode="array", tickvals=list(range(1, 13)), range=[0.4, 12.6], ticks="",
+                     ticktext=[m[:3] for m in MESES], tickfont=dict(family=FUENTE, size=12.5, color=TINTA_2))
+    fig.update_yaxes(title_text=f"Tendencia ({unidad} por década)")
     return fig
 
 
@@ -205,6 +245,7 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
     } for i, f in enumerate(tabla.itertuples())]
     tope = tope or float(tabla["pendiente_decada"].abs().max()) or 1.0
     estado = np.where(tabla["significativa"], "significativa", "no significativa")
+    estado = np.column_stack([estado, tabla["anios"] if "anios" in tabla else np.full(len(tabla), "—")])
 
     fig = go.Figure()
     fig.add_choroplethmap(
@@ -213,7 +254,7 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
         marker=dict(opacity=0.78, line=dict(width=0.5, color=SUPERFICIE)), customdata=estado,
         colorbar=dict(title=dict(text=f"{unidad}<br>por década", font=dict(color=TINTA_2)),
                       thickness=12, outlinewidth=0, tickfont=dict(color=TENUE)),
-        hovertemplate="%{z:+.3g} " + unidad + " por década<br>%{customdata}<extra></extra>",
+        hovertemplate="%{z:+.3g} " + unidad + " por década<br>%{customdata[0]}<br>n = %{customdata[1]} años<extra></extra>",
     )
     firmes = tabla[tabla["significativa"]]
     fig.add_scattermap(lat=firmes["lat"], lon=firmes["lon"], mode="markers", hoverinfo="skip",

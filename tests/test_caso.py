@@ -108,7 +108,7 @@ def test_region_promedio_y_mapa_con_tendencias_opuestas():
     assert (mapa[mapa["lat"] == 20.0]["pendiente_decada"] < -0.5).all()
     assert mapa["significativa"].all()
     r = region.resumen(mapa)
-    assert r == {"sube": 50.0, "baja": 50.0, "celdas": 4}
+    assert r == {"sube": 50.0, "baja": 50.0, "celdas": 4, "anios_min": 40, "anios_max": 40}
     # Tendencias opuestas se cancelan en el promedio: por eso hace falta el mapa.
     promedio = region.promedio_regional(cubo)
     assert len(promedio) == 480 and promedio.notna().all()
@@ -253,3 +253,62 @@ def test_en_mar_abierto_no_se_muestran_las_variables_de_tierra():
 def test_en_la_costa_se_muestran_las_dos():
     from expediente.sitio import fuera_de_lugar
     assert fuera_de_lugar(_tabla_de_sitio(GWETROOT=0.4, MAR_SST=5.0)) == frozenset()
+
+
+# ---------- análisis por estación o mes ----------
+
+def _mensual(anios=40, pendiente_verano=0.0, semilla=3):
+    """Serie mensual con ciclo estacional; la tendencia, si la hay, ocurre solo de junio a agosto."""
+    rng = np.random.default_rng(semilla)
+    meses = pd.date_range("1981-01-01", periods=12 * anios, freq="MS")
+    valores = 20 + 8 * np.sin(2 * np.pi * (meses.month - 4) / 12) + rng.normal(0, 0.5, meses.size)
+    verano = np.isin(meses.month, (6, 7, 8))
+    valores = valores + np.where(verano, pendiente_verano * (meses.year - 1981), 0.0)
+    return pd.Series(valores, index=meses)
+
+
+def test_los_meses_se_ordenan_y_se_nombran():
+    assert caso.ordenar_meses([2, 12, 1]) == (12, 1, 2)
+    assert caso.ordenar_meses([8, 6, 7]) == (6, 7, 8)
+    assert caso.ordenar_meses(range(1, 13)) == caso.TODO_EL_ANIO
+    assert caso.nombre_de_meses((12, 1, 2)) == "diciembre a febrero"
+    assert caso.nombre_de_meses((7,)) == "julio"
+    assert caso.nombre_de_meses((1, 7)) == "enero y julio"
+    assert caso.nombre_de_meses(caso.TODO_EL_ANIO) == "todo el año"
+
+
+def test_la_temporada_que_cruza_el_anio_se_asigna_al_anio_en_que_termina():
+    meses = pd.date_range("2000-01-01", "2002-12-01", freq="MS")
+    serie = pd.Series(np.arange(meses.size, dtype=float), index=meses)
+    invierno = caso.serie_de_temporada(serie, (12, 1, 2))
+    # 2000 no tiene su diciembre previo y 2003 solo tendría diciembre: quedan 2001 y 2002.
+    assert list(invierno.index) == [2001, 2002]
+    assert invierno[2001] == pytest.approx(np.mean([11, 12, 13]))  # dic 2000, ene 2001, feb 2001
+
+
+def test_una_tendencia_solo_de_verano_se_detecta_en_verano_y_no_en_invierno():
+    serie = _mensual(pendiente_verano=0.08)
+    v = POR_CODIGO["T2M"]
+    verano = caso.interrogar(serie, v, (6, 7, 8))
+    invierno = caso.interrogar(serie, v, (12, 1, 2))
+    assert verano.resolucion == "anual" and verano.por_temporada and verano.temporada == "junio a agosto"
+    assert verano.nivel in ("solida", "fuerte") and verano.pendiente_decada == pytest.approx(0.8, abs=0.15)
+    assert invierno.nivel in ("sin", "indicios")
+    assert "años" in verano.muestra and verano.n == len(verano.anual)
+
+
+def test_la_tendencia_por_mes_ubica_el_cambio_en_los_meses_correctos():
+    tabla = caso.tendencia_por_mes(_mensual(pendiente_verano=0.08), POR_CODIGO["T2M"])
+    assert len(tabla) == 12 and set(tabla.loc[tabla["significativa"], "mes"]) == {6, 7, 8}
+    assert (tabla["n"] == 40).all()
+    assert (tabla["ic_bajo"] <= tabla["pendiente_decada"]).all() and (tabla["pendiente_decada"] <= tabla["ic_alto"]).all()
+
+
+def test_loess_sigue_una_curva_que_la_recta_no_puede_seguir():
+    from expediente import estadistica as est
+    x = np.arange(1980, 2026, dtype=float)
+    y = np.abs(x - 2003) * 0.1  # baja y luego sube: la recta global es casi plana
+    curva = est.loess(x, y, 0.4)
+    assert np.abs(curva - y).max() < 0.4 and curva[0] > curva[23] + 1.5 and curva[-1] > curva[23] + 1.5
+    # Sobre una recta exacta, la regresión local la reproduce.
+    assert np.allclose(est.loess(x, 2 + 0.3 * x, 0.5), 2 + 0.3 * x)

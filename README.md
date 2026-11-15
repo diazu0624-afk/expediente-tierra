@@ -172,7 +172,7 @@ expediente-tierra/
 │   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
-│   └── test_caso.py            23 pruebas del análisis, la región, el informe y la regla tierra/mar
+│   └── test_caso.py            28 pruebas: análisis, región, informe, tierra/mar y temporadas
 ├── validacion/                 Simulaciones de Monte Carlo y filtro de calidad de datos
 │   ├── calibracion.py          Falsos positivos y potencia de cada prueba
 │   ├── veredictos.py           Falsos positivos y potencia del resultado completo
@@ -332,6 +332,27 @@ solo se recalcula lo que depende de ese control.
 
 El nivel de evidencia sale de contar pruebas superadas: 5 sólida, 4 fuerte, 2 o 3 débil,
 0 o 1 insuficiente.
+
+### 6.2.1 Análisis por estación o por mes
+
+`interrogar(serie, variable, meses)` acepta los meses del año que entran al análisis. Con menos
+de 12 meses, `caso.serie_de_temporada` reduce la serie a un dato por año (el promedio de esos
+meses; el año solo cuenta si los tiene todos; una temporada que cruza el fin de año, como
+diciembre a febrero, se asigna al año en que termina) y las cinco pruebas corren a resolución
+anual, la misma ruta que usan la nieve y las heladas y que se validó con series de 19 a 45 años.
+`escanear` y `region.mapa_de_tendencias` aceptan el mismo argumento, así que la exploración y el
+mapa también se pueden ver por temporada.
+
+`caso.tendencia_por_mes` responde otra pregunta: ¿en qué meses ocurre el cambio? Calcula la
+tendencia de cada mes del calendario con un dato por año, su intervalo de confianza del 95 % y
+su valor p (Mann-Kendall con preblanqueo), y ajusta los 12 valores p con Benjamini-Hochberg.
+
+`estadistica.loess` dibuja una curva suavizada por regresión local sobre la serie analizada. Es
+descriptiva: muestra si el cambio se aceleró, se frenó o se invirtió, sin entrar a las pruebas.
+
+**Tamaños de muestra.** `Interrogatorio.n` y `Interrogatorio.muestra` dan el tamaño de muestra
+de cada análisis; `escanear` devuelve los años de cada variable (`anios`) y
+`mapa_de_tendencias` los de cada celda. La interfaz los muestra junto a cada resultado.
 
 ### 6.3 Exploración de variables (`caso.escanear`)
 
@@ -586,7 +607,7 @@ Antes de entrar al catálogo, cada variable se evalúa en siete sitios
 
 ```bash
 .venv/bin/pip install pytest pymannkendall
-.venv/bin/python -m pytest                   # 48 pruebas
+.venv/bin/python -m pytest                   # 53 pruebas
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del resultado completo
 .venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas
