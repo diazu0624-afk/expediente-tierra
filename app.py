@@ -14,7 +14,7 @@ import streamlit as st
 import streamlit.components.v1 as componentes
 
 from expediente import caso, datos, datos_gee, graficas, informe, region, sitio as sitios, veredicto
-from expediente.variables import CATALOGO, CATEGORIAS, METODOS, POR_CODIGO, REFERENCIAS, Variable
+from expediente.variables import CATALOGO, CATEGORIAS, METODOS, POR_CODIGO, REFERENCIAS, SOLO_MAR, Variable
 
 RAIZ = Path(__file__).parent
 st.set_page_config(page_title="Expediente Tierra", page_icon=str(RAIZ / "static" / "favicon.png"),
@@ -228,6 +228,33 @@ def cargar_analisis_regional(lat: float, lon: float, codigo: str, lado: int, per
     return caso.interrogar(promedio, POR_CODIGO[codigo], meses)
 
 
+Territorio = tuple[str, float, float, float, float] | None  # (país, lat_min, lat_max, lon_min, lon_max); None = mundo
+
+
+@st.cache_data(show_spinner=False)
+def cargar_pais(lat: float, lon: float) -> Territorio:
+    pais = datos_gee.buscar_pais(lat, lon)
+    return pais.nombre, pais.lat_min, pais.lat_max, pais.lon_min, pais.lon_max
+
+
+@st.cache_data(show_spinner=False, max_entries=6)
+def cargar_cubo_territorio(territorio: Territorio, codigo: str) -> pd.DataFrame:
+    if territorio is None:
+        return datos_gee.descargar_cubo_del_mundo(codigo)
+    return datos_gee.descargar_cubo_del_pais(datos_gee.Pais(*territorio), codigo)
+
+
+@st.cache_data(show_spinner=False)
+def cargar_mapa_territorio(territorio: Territorio, codigo: str, periodo: Periodo, meses: Meses) -> pd.DataFrame:
+    return region.mapa_de_tendencias(_recortar(cargar_cubo_territorio(territorio, codigo), periodo), POR_CODIGO[codigo], meses)
+
+
+@st.cache_data(show_spinner=False)
+def cargar_analisis_territorio(territorio: Territorio, codigo: str, periodo: Periodo, meses: Meses) -> caso.Interrogatorio:
+    promedio = region.promedio_regional(_recortar(cargar_cubo_territorio(territorio, codigo), periodo))
+    return caso.interrogar(promedio, POR_CODIGO[codigo], meses)
+
+
 def elegir_periodo() -> Periodo | None:
     """Barra lateral: años inicial y final del análisis. None si el periodo es demasiado corto."""
     primero, ultimo = datos.ANIO_INICIAL, dt.date.today().year
@@ -429,7 +456,12 @@ def pagina_inicio() -> None:
     st.page_link(PAGINAS["variables"], label="Definiciones y referencias de las variables",
                  icon=":material/arrow_forward:")
 
-    seccion(6, "Comparación de dos lugares")
+    seccion(6, "Países y mundo")
+    st.markdown("El mismo análisis para un país completo o para todo el planeta: mapa de la tendencia "
+                "recortado a la frontera y serie del promedio nacional o global, con las cinco pruebas.")
+    st.page_link(PAGINAS["territorio"], label="Analizar un país o el mundo", icon=":material/arrow_forward:")
+
+    seccion(7, "Comparación de dos lugares")
     st.markdown("Un mismo proceso puede producir tendencias opuestas en regiones distintas. La "
                 "comparación coloca la misma variable de dos lugares sobre un mismo eje.")
     st.page_link(PAGINAS["comparacion"], label="Ir a la comparación", icon=":material/arrow_forward:")
@@ -487,7 +519,9 @@ def pagina_variables() -> None:
                 "y quedaron fuera: nubosidad, radiación solar y albedo de CERES SYN1deg (saltos al cambiar de "
                 "satélite); temperatura del suelo de MODIS Terra (escalón en 2020 en 5 de 6 sitios, compatible "
                 "con la deriva de su órbita); y vapor de agua de MODIS Terra (contradice en signo al reanálisis "
-                "en 4 de 7 sitios).")
+                "en 4 de 7 sitios). Se incluyen con recorte: la clorofila de MODIS Aqua, solo hasta 2021 (desde "
+                "2022 el satélite deriva de órbita y el promedio global salta sin causa oceánica); GRACE, solo "
+                "sobre tierra firme; y los productos de color del océano, solo donde hay mar.")
 
 
 # ------------------------------------------------------------------ página: análisis de un lugar
@@ -504,7 +538,13 @@ def elegir_sitio() -> dict | None:
         barra.markdown(f"**Pregunta de investigación.** {elegido['pregunta']}")
         return elegido
     if modo == "Buscar un lugar":
-        return _buscar_sitio(barra, "Ciudad, región o país", "analisis")
+        lugar = _buscar_sitio(barra, "Ciudad, región o país", "analisis")
+        if lugar and lugar.get("es_pais"):
+            barra.caption(f"{lugar['nombre']} es un país. Aquí se analiza el punto de su centro; para el país "
+                          f"completo, con su mapa y su promedio nacional:")
+            barra.page_link(PAGINAS["territorio"], label=f"Analizar {lugar['nombre']} como país",
+                            icon=":material/arrow_forward:", query_params={"pais": lugar["nombre"]})
+        return lugar
     lat = barra.number_input("Latitud", -90.0, 90.0, 19.43, step=0.5, format="%.2f")
     lon = barra.number_input("Longitud", -180.0, 180.0, -99.13, step=0.5, format="%.2f")
     return {"nombre": f"Punto ({lat:.2f}, {lon:.2f})", "lat": lat, "lon": lon}
@@ -688,9 +728,9 @@ def _tendencia_por_mes(r: caso.Interrogatorio) -> None:
             "significativa": "Significativa"})
 
 
-def paso_serie(r: caso.Interrogatorio) -> None:
+def paso_serie(r: caso.Interrogatorio, numero: int = 4) -> None:
     v = r.variable
-    seccion(4, "Serie de tiempo y pruebas de significancia")
+    seccion(numero, "Serie de tiempo y pruebas de significancia")
     texto, definicion = st.columns([5, 2], vertical_alignment="center")
     texto.markdown(f"**{v.nombre}** ({v.unidad}). {v.definicion}  \nFuente: {v.fuente}.")
     definicion_emergente(definicion, v)
@@ -785,8 +825,8 @@ def _contraste_de_hipotesis(r: caso.Interrogatorio, hipotesis: str) -> str:
 
 def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = None,
                    mapa: pd.DataFrame | None = None, region_txt: str = "",
-                   contraste: tuple[str, str | None] | None = None) -> None:
-    seccion(5, "Resultado")
+                   contraste: tuple[str, str | None] | None = None, numero: int = 5) -> None:
+    seccion(numero, "Resultado")
     v = veredicto.redactar(r)
     u = r.variable.unidad
     with st.container(border=True):
@@ -820,9 +860,12 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
         informe.informe_html(
             r, sitio["nombre"], sitio["lat"], sitio["lon"], mapa=mapa, region=region_txt, contraste=contraste,
             hipotesis=_contraste_de_hipotesis(r, hipotesis) if hipotesis else "",
-            fecha_datos=datos.fecha_de_datos(sitio["lat"], sitio["lon"], [x.codigo for x in CATALOGO if x.origen == "power"]),
+            fecha_datos=(datos.fecha_de_datos(sitio["lat"], sitio["lon"], [x.codigo for x in CATALOGO if x.origen == "power"])
+                         if sitio["lat"] is not None else dt.date.today()),
         ),
-        file_name=f"informe_{r.variable.codigo}_{sitio['lat']:.2f}_{sitio['lon']:.2f}"
+        file_name=f"informe_{r.variable.codigo}_"
+                  + (f"{sitio['lat']:.2f}_{sitio['lon']:.2f}" if sitio["lat"] is not None
+                     else "".join(ch if ch.isalnum() else "_" for ch in sitio["nombre"]))
                   + ("_" + "-".join(str(m) for m in r.meses) if r.por_temporada else "") + ".html",
         mime="text/html",
         icon=":material/download:",
@@ -865,6 +908,13 @@ por año (el promedio de esos meses; solo cuentan los años que los tienen todos
 mismas cinco pruebas a resolución anual, la misma ruta validada con series de 19 a 45 años. La
 pestaña «Tendencia por mes del año» repite el cálculo para cada mes del calendario y ajusta los
 12 valores p con Benjamini-Hochberg.
+
+**Países y mundo.** La frontera de cada país viene del catálogo LSIB 2017 del Departamento de
+Estado de EE. UU. (en Earth Engine). Entran las celdas cuyo centro cae dentro de la frontera; la
+serie nacional o global es su promedio ponderado por área (coseno de la latitud), y a esa serie
+se le aplican las mismas cinco pruebas. El tamaño de la celda se ajusta para no pasar de 6,000
+celdas: 0.25° a 1° en un país, 3° en el mundo (de 60° S a 84° N). Solo están disponibles las
+variables que llegan por Earth Engine.
 
 **Curva suavizada.** Regresión local LOESS (Cleveland, 1979) con la mitad de los datos más
 cercanos a cada punto. Describe la forma del cambio sin suponer una recta; no entra a las pruebas.
@@ -956,6 +1006,117 @@ def pagina_analisis() -> None:
                       f"{lat_max:g}°, longitud {lon_min:g}° a {lon_max:g}°.")
     paso_resultado(r, sitio, hipotesis, mapa, region_txt, CONTRASTES.get((ejemplo, codigo)))
     contraste_con_literatura(ejemplo, codigo)
+    metodo()
+
+
+# ------------------------------------------------------------------ página: país o mundo
+
+def _elegir_pais(barra) -> tuple[str, Territorio] | None:
+    """Campo para escribir un país. Devuelve (nombre, territorio) o None si aún no hay uno válido."""
+    texto = barra.text_input("País", value=_parametro("pais"), placeholder="Ej. México")
+    if not texto.strip():
+        encabezado("País o mundo", "Escribe un país")
+        st.info("Escribe el nombre de un país en la barra lateral.")
+        return None
+    try:
+        paises = [l for l in buscar(texto.strip()) if l.get("es_pais")]
+    except datos.ErrorDeDatos as error:
+        st.error(str(error))
+        return None
+    if not paises:
+        encabezado("País o mundo", "País no encontrado")
+        st.warning(f"No se encontró un país llamado «{texto.strip()}». Para una ciudad o una región, usa "
+                   f"«Análisis de un lugar».")
+        return None
+    lugar = paises[0] if len(paises) == 1 else barra.selectbox("Coincidencias", paises, format_func=lambda l: l["nombre"])
+    try:
+        with st.spinner("Buscando la frontera del país..."):
+            return lugar["nombre"], cargar_pais(lugar["lat"], lugar["lon"])
+    except datos.ErrorDeDatos as error:
+        encabezado("País o mundo", lugar["nombre"])
+        st.error(f"No se pudo obtener la frontera. {error}")
+        return None
+
+
+def pagina_territorio() -> None:
+    barra = st.sidebar
+    barra.markdown("**Territorio**")
+    modo = barra.radio("Territorio", ["Mundo", "País"], index=1 if _parametro("pais") else 0,
+                       horizontal=True, label_visibility="collapsed")
+    nombre, territorio = "Mundo", None
+    if modo == "País":
+        elegido = _elegir_pais(barra)
+        if elegido is None:
+            return
+        nombre, territorio = elegido
+    # En un país solo se ofrecen variables de tierra; en el mundo, todas las que llegan por Earth Engine.
+    codigos = [v.codigo for v in CATALOGO if v.origen == "gee" and not (territorio and v.codigo in SOLO_MAR)]
+    pedida = _parametro("var")
+    inicial = pedida if pedida in codigos else "FLDAS_TEMP" if territorio else "MAR_SST"
+    barra.markdown("**Variable**")
+    codigo = barra.selectbox("Variable", codigos, index=codigos.index(inicial), label_visibility="collapsed",
+                             format_func=lambda c: POR_CODIGO[c].nombre)
+    periodo = elegir_periodo()
+    meses = elegir_meses()
+    v = POR_CODIGO[codigo]
+    encabezado("Análisis de un país" if territorio else "Análisis global", nombre, v.nombre)
+    if periodo is None:
+        st.info(f"El periodo elegido es demasiado corto. Amplíalo a {caso.MIN_ANIOS} años o más en la barra lateral.")
+        return
+    try:
+        with st.spinner("Descargando los datos de Earth Engine y calculando la tendencia de cada celda..."):
+            mapa = cargar_mapa_territorio(territorio, codigo, periodo, meses)
+            r = cargar_analisis_territorio(territorio, codigo, periodo, meses)
+    except datos.ErrorDeDatos as error:
+        st.error(f"No se pudieron obtener los datos. {error}")
+        return
+    except caso.CasoImposible as error:
+        st.warning(f"Esta variable no se puede analizar en {nombre}. {error}")
+        return
+    if mapa.empty:
+        st.warning(f"Esta variable no tiene datos suficientes en {nombre}.")
+        return
+
+    seccion(1, "Territorio y variable")
+    texto, definicion = st.columns([5, 2], vertical_alignment="center")
+    texto.markdown(f"**{v.nombre}** ({v.unidad}). {v.definicion}  \nFuente: {v.fuente}.")
+    definicion_emergente(definicion, v)
+    caja_del_territorio = territorio[1:] if territorio else datos_gee.MUNDO
+    celda = datos_gee.celda_para(codigo, *caja_del_territorio)
+    resumen = region.resumen(mapa)
+    anios = (f"{resumen['anios_min']} años" if resumen["anios_min"] == resumen["anios_max"]
+             else f"entre {resumen['anios_min']} y {resumen['anios_max']} años")
+    alcance = ("las celdas cuyo centro cae dentro de la frontera (catálogo LSIB 2017 del Departamento de "
+               "Estado de EE. UU.)" if territorio else "todas las celdas con datos entre 60° S y 84° N")
+    st.caption(f"Tamaño de muestra: {resumen['celdas']:,} celdas de {celda:g}° (unos {celda * 111:,.0f} km de lado), "
+               f"cada una con {anios} de datos"
+               + (f" de {caso.nombre_de_meses(meses)}" if len(meses) < 12 else "")
+               + f". Entran {alcance}. El promedio {'nacional' if territorio else 'global'} pondera cada celda "
+                 f"por su área.")
+
+    seccion(2, "Distribución espacial de la tendencia")
+    texto = (f"La tendencia es positiva y significativa en **{resumen['sube']:.0f} %** de las celdas, y negativa "
+             f"y significativa en **{resumen['baja']:.0f} %**.")
+    if resumen["sube"] >= 5 and resumen["baja"] >= 5:
+        texto += f" **La misma variable presenta tendencias opuestas dentro de {'el país' if territorio else 'el planeta'}.**"
+    st.markdown(texto)
+    plotly(graficas.mapa(mapa, v.unidad))
+    st.caption("Rojo: tendencia positiva. Azul: negativa. El punto marca las celdas con tendencia significativa "
+               "tras el ajuste de Benjamini-Hochberg por comparaciones múltiples. Las zonas sin color no tienen "
+               "datos de esta variable.")
+    with st.expander("Ver como tabla"):
+        st.dataframe(mapa, hide_index=True, width="stretch", column_config={
+            "lat": "Latitud", "lon": "Longitud", "anios": "n (años)",
+            "pendiente_decada": st.column_config.NumberColumn(f"Cambio por década ({v.unidad})", format="%.3g"),
+            "p": st.column_config.NumberColumn("p", format="%.3f"),
+            "p_ajustada": st.column_config.NumberColumn("p ajustada", format="%.3f"),
+            "significativa": "Significativa"})
+
+    paso_serie(r, numero=3)
+    promedio = "promedio nacional" if territorio else "promedio global"
+    paso_resultado(r, {"nombre": f"{nombre} ({promedio} de {resumen['celdas']:,} celdas)", "lat": None, "lon": None},
+                   mapa=mapa, numero=4,
+                   region_txt=f"{nombre}: {resumen['celdas']:,} celdas de {celda:g}° con datos.")
     metodo()
 
 
@@ -1082,6 +1243,7 @@ PAGINAS.update({
     "inicio": st.Page(pagina_inicio, title="Inicio", url_path="inicio", default=True),
     "variables": st.Page(pagina_variables, title="Variables", url_path="variables"),
     "analisis": st.Page(pagina_analisis, title="Análisis de un lugar", url_path="analisis"),
+    "territorio": st.Page(pagina_territorio, title="País o mundo", url_path="territorio"),
     "comparacion": st.Page(pagina_comparacion, title="Comparación de dos lugares", url_path="comparacion"),
 })
 st.navigation(list(PAGINAS.values()), position="top").run()

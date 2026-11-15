@@ -182,5 +182,6 @@ def buscar_lugar(texto: str, maximo: int = 5) -> list[dict]:
     for r in resultados:
         partes = [r.get("name"), r.get("admin1"), r.get("country")]
         nombre = ", ".join(dict.fromkeys(p for p in partes if p))
-        lugares.append({"nombre": nombre, "lat": r["latitude"], "lon": r["longitude"]})
+        lugares.append({"nombre": nombre, "lat": r["latitude"], "lon": r["longitude"],
+                        "es_pais": str(r.get("feature_code", "")).startswith("PCL")})
     return lugares

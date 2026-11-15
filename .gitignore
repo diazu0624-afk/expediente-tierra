@@ -3,3 +3,11 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .DS_Store
+
+# Cubos mundiales: solo se versionan los de las variables principales (el resto se vuelve a bajar).
+cache_power/mundo_*
+!cache_power/mundo_MAR_SST_3.csv.gz
+!cache_power/mundo_FLDAS_TEMP_3.csv.gz
+!cache_power/mundo_GPM_LLUVIA_3.csv.gz
+!cache_power/mundo_MODIS_NDVI_3.csv.gz
+!cache_power/mundo_GRACE_AGUA_3.csv.gz

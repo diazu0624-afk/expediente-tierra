@@ -267,6 +267,9 @@ def _extremo(codigo: str, nombre: str, unidad: str, definicion: str, tecnica: st
 #   de 7 sitios, con un quiebre común en 2008.
 # - Temperatura del tope de las nubes (MOD08_M3) y presión del tope de la capa límite
 #   (POWER): escala u interpretación dudosas.
+# Variables incluidas con recorte:
+# - Clorofila de MODIS Aqua: solo hasta 2021 (salto global en 2022-2025 por la deriva de órbita).
+# - GRACE: solo sobre tierra. Temperatura del mar y clorofila de MODIS Aqua: solo sobre océano.
 
 CATALOGO: tuple[Variable, ...] = (
     # --- Temperatura ---
@@ -490,6 +493,16 @@ CATALOGO: tuple[Variable, ...] = (
              desde=2005, relativo=True, origen="gee",
              aviso="La colección mezcla varios instrumentos desde 1978; aquí se analiza solo el "
                    "periodo de OMI para no confundir un cambio de instrumento con una tendencia."),
+    Variable("FLDAS_TEMP", "Temperatura del aire (FLDAS)", "°C", TEMPERATURA,
+             "Qué tan caliente o frío está el aire cerca del suelo, en una rejilla más fina que la del reanálisis.",
+             "Temperatura del aire cerca de la superficie que alimenta al modelo FLDAS: es la de MERRA-2 "
+             "llevada a una rejilla de 0.1°. No es una fuente independiente de «Temperatura del aire»; se "
+             "incluye porque permite analizar países completos y el mundo.",
+             "FLDAS Noah (forzado con MERRA-2 y CHIRPS), campo Tair_f_tavg; colección "
+             "NASA/FLDAS/NOAH01/C/GL/M/V001 de Google Earth Engine.",
+             ("mcnally2017", "mcnally2018", "gelaro2017", "gorelick2017"), fuente=FLDAS,
+             resolucion="0.1° nativo, muestreado a 0.5° (unos 50 km)", desde=1982,
+             origen="gee", tipo="Modelo de superficie terrestre"),
     Variable("FLDAS_ESCURRIMIENTO", "Escurrimiento (FLDAS)", "mm/día", HIDRO,
              "El agua de lluvia y deshielo que no se queda en el suelo y corre hacia arroyos, "
              "ríos y acuíferos.",
@@ -527,7 +540,9 @@ CATALOGO: tuple[Variable, ...] = (
              ("obpg2022", "gorelick2017"), fuente=MODIS_AQUA,
              resolucion="4 km nativo, muestreado a 0.5° (unos 50 km)", desde=2003,
              relativo=True, origen="gee",
-             aviso="La clorofila tiene una distribución muy asimétrica: unos pocos florecimientos "
+             aviso="El registro se analiza de 2003 a 2021. Desde 2022 el satélite Aqua deriva de órbita y "
+                   "la clorofila muestra un salto global que no es del océano, así que esos años se "
+                   "descartan. Además, su distribución es muy asimétrica: unos pocos florecimientos "
                    "intensos pesan mucho en el promedio."),
     # --- Extremos: índices anuales calculados con datos diarios (definiciones del ETCCDI) ---
     _extremo("EXT_TXX", "Día más caluroso del año", "°C",
@@ -587,6 +602,7 @@ NOMBRES_ORIGINALES = {
     "MODIS_NUBES": "Cloud Fraction (Cloud_Fraction_Mean_Mean)",
     "OMI_OZONO": "Total column ozone (ozone)",
     "FLDAS_ESCURRIMIENTO": "Storm surface runoff + Baseflow-groundwater runoff (Qs_tavg, Qsb_tavg)",
+    "FLDAS_TEMP": "Near surface air temperature (Tair_f_tavg)",
     "MAR_SST": "Daily sea surface temperature (sst)",
     "MAR_SST_MODIS": "Sea surface temperature (sst)",
     "MAR_CLOROFILA": "Chlorophyll a concentration (chlor_a)",
@@ -634,6 +650,7 @@ RELEVANCIA = {
     "MODIS_AOD": "Es una observación directa de los aerosoles, que afectan la salud, la luz solar que llega al suelo y las nubes.",
     "MODIS_NUBES": "Las nubes regulan cuánta energía del Sol entra y cuánta sale: son la mayor incertidumbre del clima.",
     "OMI_OZONO": "Es la vigilancia satelital directa de la capa de ozono, que absorbe la radiación ultravioleta dañina.",
+    "FLDAS_TEMP": "Es el indicador básico del calentamiento; en rejilla fina permite ver cómo cambia dentro de un país.",
     "FLDAS_ESCURRIMIENTO": "Determina cuánta agua llega a ríos, presas y acuíferos: es la base del abasto de agua y del riesgo de inundación.",
     "MAR_SST": "El océano absorbe la mayor parte del calor que gana el planeta; su temperatura controla huracanes, corales y pesquerías.",
     "MAR_SST_MODIS": "Es una medición satelital independiente de la temperatura del mar, que permite confirmar el análisis de largo plazo.",
@@ -648,7 +665,7 @@ POR_CODIGO: dict[str, Variable] = {v.codigo: v for v in CATALOGO}
 # GRACE ahí mide masa del océano, no agua terrestre, y el reanálisis no tiene suelo.
 SOLO_TIERRA = frozenset({
     "GWETTOP", "GWETROOT", "EVLAND", "PRECSNOLAND", "SNODP",
-    "GRACE_AGUA", "MODIS_NDVI", "MODIS_EVI", "FLDAS_ESCURRIMIENTO",
+    "GRACE_AGUA", "MODIS_NDVI", "MODIS_EVI", "FLDAS_ESCURRIMIENTO", "FLDAS_TEMP",
 })
 # Las del océano (categoría OCEANO) solo se muestran donde hay mar: los sensores de color
 # del océano también "ven" ríos y lagos, pero ahí sus algoritmos no son válidos.

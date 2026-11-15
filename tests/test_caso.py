@@ -354,3 +354,31 @@ def test_un_calentamiento_aumenta_los_dias_de_calor_y_se_detecta():
     assert r.n == 40 and "años" in r.muestra
     with pytest.raises(caso.CasoImposible):
         caso.interrogar(indices["EXT_DIAS_CALOR"], POR_CODIGO["EXT_DIAS_CALOR"], (6, 7, 8))
+
+
+# ---------- rejillas de países y del mundo ----------
+
+def test_la_rejilla_cubre_el_recuadro_y_nombra_las_celdas_por_su_centro():
+    from expediente import datos_gee as g
+    rejilla = g.rejilla_del_recuadro(14.53, 32.72, -118.37, -86.73, 0.5)
+    assert rejilla.lat_max == 33.0 and rejilla.lon_min == -118.5
+    assert rejilla.lats[0] == 32.75 and rejilla.lats[-1] <= 14.75 and rejilla.lons[0] == -118.25
+    assert rejilla.lons[-1] >= -86.73 - 0.5 and len(rejilla.columnas) == rejilla.ancho * rejilla.alto
+    assert rejilla.columnas[0] == "32.75,-118.25"
+
+
+def test_la_celda_se_agranda_hasta_caber_en_el_tope_y_no_baja_de_la_del_producto():
+    from expediente import datos_gee as g
+    assert g.celda_para("GPM_LLUVIA", 13.2, 14.5, -90.1, -87.7) == 0.25  # El Salvador: celda fina
+    assert g.celda_para("GPM_LLUVIA", 14.5, 32.7, -118.4, -86.7) == 0.5  # México
+    assert g.celda_para("MODIS_AOD", 13.2, 14.5, -90.1, -87.7) == 1.0  # el producto es de 1°
+    assert g.celda_para("GPM_LLUVIA", *g.MUNDO) == 3.0
+    lat_min, lat_max, lon_min, lon_max = g.MUNDO
+    assert (lat_max - lat_min) * (lon_max - lon_min) / 3.0 ** 2 <= g.MAX_CELDAS
+
+
+def test_el_informe_de_un_pais_no_lleva_coordenadas():
+    from expediente import informe
+    r = caso.interrogar(_serie(0.05), POR_CODIGO["FLDAS_TEMP"])
+    html = informe.informe_html(r, "México (promedio nacional de 802 celdas)", None, None)
+    assert "promedio nacional" in html and "Latitud" not in html.split("Periodo analizado")[0].split("Sitio de estudio")[1]

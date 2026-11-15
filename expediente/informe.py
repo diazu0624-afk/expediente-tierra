@@ -230,8 +230,8 @@ footer { margin-top: 2.5rem; padding-top: .6rem; border-top: 1px solid var(--fil
 def informe_html(
     r: Interrogatorio,
     sitio: str,
-    lat: float,
-    lon: float,
+    lat: float | None,
+    lon: float | None,
     mapa: pd.DataFrame | None = None,
     region: str = "",
     contraste: tuple[str, str | None] | None = None,
@@ -261,7 +261,7 @@ def informe_html(
         f'<p class="sub">{escape(v.nombre)} en {escape(sitio)}</p></div>',
         '<dl>',
         f'<dt>Variable</dt><dd>{escape(v.nombre)} ({escape(v.unidad)})</dd>',
-        f'<dt>Sitio de estudio</dt><dd>{escape(sitio)}<br>Latitud {lat:.2f}°, longitud {lon:.2f}°</dd>',
+        f'<dt>Sitio de estudio</dt><dd>{escape(sitio)}{f"<br>Latitud {lat:.2f}°, longitud {lon:.2f}°" if lat is not None else ""}</dd>',
         f'<dt>Periodo analizado</dt><dd>{inicio:{fecha}} a {fin:{fecha}} ({r.anios_de_datos:.0f} años de datos{f"; solo {r.temporada}" if r.por_temporada else "; un valor por año" if v.anual else " mensuales"})</dd>',
         f'<dt>Tamaño de muestra</dt><dd>{escape(r.muestra)}</dd>',
         f'<dt>Fuente de datos</dt><dd>{escape(v.fuente)}</dd>',
@@ -359,7 +359,7 @@ def informe_html(
             seccion("Distribución espacial"),
             f'<p>{escape(region)} La tendencia es positiva y significativa en {sube:.0f} % de las {len(mapa)} celdas con '
             f'datos, y negativa y significativa en {baja:.0f} %.</p>',
-            f'<figure><div class="mapa">{_svg_mapa(mapa, lat, lon)}</div>',
+            f'<figure><div class="mapa">{_svg_mapa(mapa, lat if lat is not None else float("nan"), lon if lon is not None else float("nan"))}</div>',
             _escala_de_color(float(mapa["pendiente_decada"].abs().max()) or 1.0, u),
             '<figcaption>Tendencia de cada celda calculada con sus promedios anuales. La significancia se ajustó con '
             'el procedimiento de Benjamini-Hochberg por comparaciones múltiples. Las zonas sin color no tienen '

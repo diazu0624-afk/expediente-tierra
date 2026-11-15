@@ -225,7 +225,7 @@ def triangulo(r: Interrogatorio) -> go.Figure:
     return fig
 
 
-def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
+def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float | None = None, lugar_lon: float | None = None,
          tope: float | None = None, alejar: float = 0.0,
          celda: tuple[float, float] | None = None) -> go.Figure:
     """Mapa de la región: el color de cada celda es su tendencia; el punto marca las significativas.
@@ -259,12 +259,13 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
     )
     firmes = tabla[tabla["significativa"]]
     fig.add_scattermap(lat=firmes["lat"], lon=firmes["lon"], mode="markers", hoverinfo="skip",
-                       marker=dict(size=4, color=TINTA, opacity=0.6),
+                       marker=dict(size=4 if len(tabla) < 1500 else 3, color=TINTA, opacity=0.6),
                        name="Celda con tendencia significativa")
-    fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
-                       marker=dict(size=14, color=SUPERFICIE), showlegend=False)
-    fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
-                       marker=dict(size=9, color=TINTA), name="Sitio de estudio")
+    if lugar_lat is not None:  # los mapas de un país o del mundo no tienen sitio de estudio
+        fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
+                           marker=dict(size=14, color=SUPERFICIE), showlegend=False)
+        fig.add_scattermap(lat=[lugar_lat], lon=[lugar_lon], mode="markers", hoverinfo="skip",
+                           marker=dict(size=9, color=TINTA), name="Sitio de estudio")
     if celda is not None:
         for tamano, color, visible in ((22, TINTA, True), (16, SUPERFICIE, False)):
             fig.add_scattermap(lat=[celda[0]], lon=[celda[1]], mode="markers", hoverinfo="skip",
@@ -273,9 +274,12 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float, lugar_lon: float,
     _base(fig, alto=480)
     # Acercamiento para que el recuadro completo quepa a lo alto (el mapa se estira hacia los polos).
     alto_grados = (lats.max() - lats.min() + alto_celda) / np.cos(np.radians(float(lats.mean())))
+    ancho_grados = lons.max() - lons.min() + ancho_celda
+    # ... y a lo ancho, que es lo que limita en un país alargado o en el mapa mundial.
+    acercamiento = min(np.log2(360 * 440 / (512 * 1.15 * alto_grados)), np.log2(360 * 820 / (512 * 1.1 * ancho_grados)))
     fig.update_layout(
         map=dict(style="carto-positron", center=dict(lat=float(lats.mean()), lon=float(lons.mean())),
-                 zoom=float(np.log2(360 * 440 / (512 * 1.15 * alto_grados))) - alejar),
+                 zoom=float(acercamiento) - alejar),
         margin=dict(l=0, r=0, t=36, b=0),
     )
     return fig

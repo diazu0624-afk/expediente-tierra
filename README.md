@@ -159,9 +159,9 @@ expediente-tierra/
 │   └── demo.html               Recorrido animado (lo genera expediente/demo.py)
 ├── expediente/                 Lógica de la aplicación (sin Streamlit)
 │   ├── __init__.py
-│   ├── variables.py            Catálogo de 45 variables y 35 referencias con DOI
+│   ├── variables.py            Catálogo de 46 variables y 35 referencias con DOI
 │   ├── datos.py                NASA POWER (punto y región), geocodificador y caché
-│   ├── datos_gee.py            Google Earth Engine: 11 variables de satélites y modelos
+│   ├── datos_gee.py            Google Earth Engine: 12 variables; cubos de un recuadro, un país o el mundo
 │   ├── sitio.py                Todas las variables de un punto; regla tierra/mar
 │   ├── extremos.py             Índices anuales de extremos con datos diarios de POWER
 │   ├── estadistica.py          Motor estadístico: pruebas, estimadores, bootstrap
@@ -173,7 +173,7 @@ expediente-tierra/
 │   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
-│   └── test_caso.py            31 pruebas: análisis, región, informe, tierra/mar, temporadas y extremos
+│   └── test_caso.py            34 pruebas: análisis, región, informe, temporadas, extremos y territorios
 ├── validacion/                 Simulaciones de Monte Carlo y filtro de calidad de datos
 │   ├── calibracion.py          Falsos positivos y potencia de cada prueba
 │   ├── veredictos.py           Falsos positivos y potencia del resultado completo
@@ -378,6 +378,26 @@ variable de origen `"diario"` con un valor por año (fechado el 1 de julio), y p
 mismas cinco pruebas a resolución anual. No tienen mapa regional ni análisis por temporada: la
 API regional de POWER no entrega datos diarios y los índices son anuales por definición.
 
+### 6.2.3 Países y mundo (`app.pagina_territorio`)
+
+La página «País o mundo» repite el análisis para un territorio completo, con las variables que
+llegan por Earth Engine:
+
+1. **Frontera.** El país se escribe en español; el geocodificador da un punto dentro de él y
+   `datos_gee.buscar_pais` pide a Earth Engine el polígono que contiene ese punto (catálogo LSIB
+   2017 del Departamento de Estado de EE. UU.), sin depender de cómo se escriba el nombre.
+2. **Rejilla.** `celda_para` elige la celda más fina que no pase de 6,000 celdas (0.25° a 1° en un
+   país; 3° en el mundo, de 60° S a 84° N) y `rejilla_del_recuadro` la alinea.
+3. **Cubo.** `descargar_cubo_del_pais` conserva las celdas cuyo centro cae dentro de la frontera;
+   `descargar_cubo_del_mundo`, todas las que tienen datos. GRACE se recorta a tierra firme y los
+   productos de color del océano al mar de OISST (`_dominio`).
+4. **Mapa y serie.** `region.mapa_de_tendencias` calcula la tendencia de cada celda y
+   `region.promedio_regional` el promedio nacional o global ponderado por área, al que
+   `caso.interrogar` aplica las cinco pruebas. El informe se descarga igual que en un lugar.
+
+Un país baja en unos 3 segundos y el mundo en 10 a 30 la primera vez; después se leen de
+`cache_power/pais_*.csv.gz` y `cache_power/mundo_*.csv.gz`.
+
 ### 6.3 Exploración de variables (`caso.escanear`)
 
 Para cada variable del catálogo: promedios anuales, regresión lineal, tendencia
@@ -581,6 +601,8 @@ Archivos de `cache_power/`:
 | `region_{codigo}_{caja}_{inicio}_{fin}.csv` | Región de reanálisis |
 | `diario_{lat}_{lon}_{inicio}_{fin}.csv` | Punto: temperatura máxima, mínima y precipitación de cada día |
 | `gee_{codigo}_{caja}.csv` | Región de satélite, siempre de 10° |
+| `pais_{codigo}_{pais}_{celda}.csv.gz` | Celdas dentro de la frontera de un país |
+| `mundo_{codigo}_{celda}.csv.gz` | Celdas de todo el planeta |
 | `descargas.json` | Fecha de descarga de cada archivo |
 
 Colecciones de Earth Engine (`datos_gee.FUENTES`):
@@ -588,6 +610,7 @@ Colecciones de Earth Engine (`datos_gee.FUENTES`):
 | Código | Colección | Banda | Conversión |
 |---|---|---|---|
 | `GPM_LLUVIA` | `NASA/GPM_L3/IMERG_MONTHLY_V07` | `precipitation` | mm/h a mm/día |
+| `FLDAS_TEMP` | `NASA/FLDAS/NOAH01/C/GL/M/V001` | `Tair_f_tavg` | K a °C |
 | `MODIS_NDVI`, `MODIS_EVI` | `MODIS/061/MOD13A3` | `NDVI`, `EVI` | × 0.0001 |
 | `GRACE_AGUA` | `NASA/GRACE/MASS_GRIDS_V04/MASCON_CRI` | `lwe_thickness` | Ninguna (cm) |
 | `MODIS_AOD` | `MODIS/061/MOD08_M3` | `Aerosol_Optical_Depth_Land_Ocean_Mean_Mean` | × 0.001 |
@@ -618,6 +641,10 @@ Antes de entrar al catálogo, cada variable se evalúa en siete sitios
 | Temperatura del mar MODIS frente a OISST | r = 0.90 a 0.98; tendencias a menos de 0.05 °C/década en 4 puntos de océano | Incluida |
 | Temperatura del suelo MODIS Terra (MOD21C3) | Escalón en 2020 en 5 de 6 sitios; r = 0.47 con MERRA-2 | Excluida |
 | Vapor de agua MODIS Terra (MOD08_M3) | Signo contrario a MERRA-2 en 4 de 7 sitios; quiebre común en 2008 | Excluida |
+| Temperatura del aire FLDAS frente a MERRA-2 | r = 0.90 a 0.99; tendencias a menos de 0.03 °C/década en 6 sitios | Incluida |
+| Clorofila MODIS Aqua, promedio global | Sin tendencia hasta 2021; salto de 0.31 a 0.40 mg/m³ en 2022-2025 (deriva de órbita de Aqua) | Incluida solo hasta 2021 |
+| GRACE sobre el océano | Ahí mide masa oceánica, no agua terrestre | Recortada a tierra firme |
+| Temperatura del mar y clorofila MODIS Aqua sobre tierra | El sensor también ve lagos y ríos, donde no es válido | Recortadas al océano de OISST |
 | Nubosidad, radiación y albedo de CERES SYN1deg | Saltos al cambiar los satélites de entrada | Excluidas |
 | Temperatura del tope de nubes; tope de la capa límite | Escala o interpretación dudosas | Excluidas |
 
@@ -632,7 +659,7 @@ Antes de entrar al catálogo, cada variable se evalúa en siete sitios
 
 ```bash
 .venv/bin/pip install pytest pymannkendall
-.venv/bin/python -m pytest                   # 56 pruebas
+.venv/bin/python -m pytest                   # 59 pruebas
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del resultado completo
 .venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas
