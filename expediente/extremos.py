@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from .datos import ANIO_INICIAL, DIR_CACHE, SIN_DATO, ErrorDeDatos, guardar_en_cache, leer_cache, vigente
+from .datos import ANIO_INICIAL, CACHE, SIN_DATO, ErrorDeDatos
 
 POWER_DIARIO_URL = "https://power.larc.nasa.gov/api/temporal/daily/point"
 PARAMETROS = ("T2M_MAX", "T2M_MIN", "PRECTOTCORR")
@@ -33,9 +33,9 @@ def descargar_diarios(lat: float, lon: float, inicio: int = ANIO_INICIAL, fin: i
     """Temperatura máxima, mínima y precipitación de cada día en un punto."""
     fin = fin or dt.date.today().year
     lat, lon = round(lat, 2), round(lon, 2)
-    ruta = DIR_CACHE / f"diario_{lat:+.2f}_{lon:+.2f}_{inicio}_{fin}.csv"
-    if vigente(ruta):
-        return leer_cache(ruta)
+    ruta = CACHE.ruta(f"diario_{lat:+.2f}_{lon:+.2f}_{inicio}_{fin}.csv")
+    if CACHE.vigente(ruta):
+        return CACHE.leer(ruta)
     consulta = {"parameters": ",".join(PARAMETROS), "community": "AG", "latitude": lat, "longitude": lon,
                 "start": f"{inicio}0101", "end": f"{fin}1231", "format": "JSON"}
     try:
@@ -46,10 +46,10 @@ def descargar_diarios(lat: float, lon: float, inicio: int = ANIO_INICIAL, fin: i
         tabla.index = pd.to_datetime(tabla.index, format="%Y%m%d")
     except (requests.RequestException, KeyError, ValueError) as error:
         if ruta.exists():  # sin conexión: mejor datos viejos que ninguno
-            return leer_cache(ruta)
+            return CACHE.leer(ruta)
         raise ErrorDeDatos(f"NASA POWER no entregó los datos diarios de ({lat}, {lon}): {error}") from error
     tabla = tabla.sort_index().replace(SIN_DATO, np.nan).dropna(how="all")
-    guardar_en_cache(tabla, ruta, float_format="%.4g")
+    CACHE.guardar(tabla, ruta, float_format="%.4g")
     return tabla
 
 

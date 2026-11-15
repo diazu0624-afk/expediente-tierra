@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import requests
+
+from .cache import CacheEnDisco
 
 POWER_URL = "https://power.larc.nasa.gov/api/temporal/monthly/point"
 POWER_REGION_URL = "https://power.larc.nasa.gov/api/temporal/monthly/regional"
@@ -18,43 +19,12 @@ ANIO_INICIAL = 1981
 MAX_PARAMETROS = 20  # límite de la API por petición
 SIN_DATO = -999.0
 DIR_CACHE = Path(__file__).resolve().parent.parent / "cache_power"
-INDICE_CACHE = DIR_CACHE / "descargas.json"  # nombre de archivo -> fecha de descarga
 DIAS_VIGENCIA = 30  # pasado este plazo se intenta descargar de nuevo
+CACHE = CacheEnDisco(DIR_CACHE, DIAS_VIGENCIA)  # la comparten todas las fuentes de datos
 
 
 class ErrorDeDatos(RuntimeError):
     """La fuente de datos no respondió o respondió algo inesperado."""
-
-
-def _fechas() -> dict[str, str]:
-    try:
-        return json.loads(INDICE_CACHE.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
-def fecha_de_descarga(ruta: Path) -> dt.date | None:
-    """Cuándo se bajó de la fuente un archivo de la caché (None si no hay registro)."""
-    fecha = _fechas().get(ruta.name)
-    return dt.date.fromisoformat(fecha) if fecha else None
-
-
-def vigente(ruta: Path) -> bool:
-    """El archivo existe y se descargó hace menos de DIAS_VIGENCIA días."""
-    fecha = fecha_de_descarga(ruta)
-    return ruta.exists() and fecha is not None and (dt.date.today() - fecha).days <= DIAS_VIGENCIA
-
-
-def guardar_en_cache(tabla: pd.DataFrame, ruta: Path, **formato) -> None:
-    DIR_CACHE.mkdir(exist_ok=True)
-    tabla.to_csv(ruta, **formato)
-    fechas = _fechas()
-    fechas[ruta.name] = dt.date.today().isoformat()
-    INDICE_CACHE.write_text(json.dumps(fechas, indent=0, sort_keys=True))
-
-
-def leer_cache(ruta: Path) -> pd.DataFrame:
-    return pd.read_csv(ruta, index_col=0, parse_dates=True)
 
 
 def _a_tabla(parametros: dict[str, dict[str, float]]) -> pd.DataFrame:
@@ -71,7 +41,7 @@ def _a_tabla(parametros: dict[str, dict[str, float]]) -> pd.DataFrame:
 
 def _ruta_cache(lat: float, lon: float, codigos: list[str], inicio: int, fin: int) -> Path:
     huella = hashlib.sha1(",".join(sorted(codigos)).encode()).hexdigest()[:10]
-    return DIR_CACHE / f"power_{lat:+.2f}_{lon:+.2f}_{inicio}_{fin}_{huella}.csv"
+    return CACHE.ruta(f"power_{lat:+.2f}_{lon:+.2f}_{inicio}_{fin}_{huella}.csv")
 
 
 def descargar_power(
@@ -90,8 +60,8 @@ def descargar_power(
     fin = fin or dt.date.today().year
     lat, lon = round(lat, 2), round(lon, 2)
     ruta = _ruta_cache(lat, lon, codigos, inicio, fin)
-    if usar_cache and vigente(ruta):
-        return leer_cache(ruta)
+    if usar_cache and CACHE.vigente(ruta):
+        return CACHE.leer(ruta)
 
     partes = []
     for i in range(0, len(codigos), MAX_PARAMETROS):
@@ -110,7 +80,7 @@ def descargar_power(
             parametros = respuesta.json()["properties"]["parameter"]
         except (requests.RequestException, KeyError, ValueError) as error:
             if usar_cache and ruta.exists():  # sin conexión: mejor datos viejos que ninguno
-                return leer_cache(ruta)
+                return CACHE.leer(ruta)
             raise ErrorDeDatos(f"NASA POWER no respondió para ({lat}, {lon}): {error}") from error
         partes.append(_a_tabla(parametros))
 
@@ -118,13 +88,13 @@ def descargar_power(
     # El año en curso llega con meses futuros vacíos.
     tabla = tabla.loc[:tabla.dropna(how="all").index.max()]
     if usar_cache:
-        guardar_en_cache(tabla, ruta)
+        CACHE.guardar(tabla, ruta)
     return tabla
 
 
 def fecha_de_datos(lat: float, lon: float, codigos: list[str], inicio: int = ANIO_INICIAL) -> dt.date | None:
     """Fecha en que se descargaron de NASA POWER los datos de un punto."""
-    return fecha_de_descarga(_ruta_cache(round(lat, 2), round(lon, 2), codigos, inicio, dt.date.today().year))
+    return CACHE.fecha_de_descarga(_ruta_cache(round(lat, 2), round(lon, 2), codigos, inicio, dt.date.today().year))
 
 
 def caja(lat: float, lon: float, lado: float) -> tuple[float, float, float, float]:
@@ -144,9 +114,9 @@ def descargar_region(lat: float, lon: float, codigo: str, lado: float = 8,
     """
     fin = fin or dt.date.today().year
     lat_min, lat_max, lon_min, lon_max = caja(lat, lon, lado)
-    ruta = DIR_CACHE / f"region_{codigo}_{lat_min:+.0f}_{lat_max:+.0f}_{lon_min:+.0f}_{lon_max:+.0f}_{inicio}_{fin}.csv"
-    if vigente(ruta):
-        return leer_cache(ruta)
+    ruta = CACHE.ruta(f"region_{codigo}_{lat_min:+.0f}_{lat_max:+.0f}_{lon_min:+.0f}_{lon_max:+.0f}_{inicio}_{fin}.csv")
+    if CACHE.vigente(ruta):
+        return CACHE.leer(ruta)
     consulta = {"parameters": codigo, "community": "AG", "latitude-min": lat_min,
                 "latitude-max": lat_max, "longitude-min": lon_min, "longitude-max": lon_max,
                 "start": inicio, "end": fin, "format": "JSON"}
@@ -161,11 +131,11 @@ def descargar_region(lat: float, lon: float, codigo: str, lado: float = 8,
         }
     except (requests.RequestException, KeyError, ValueError, IndexError) as error:
         if ruta.exists():
-            return leer_cache(ruta)
+            return CACHE.leer(ruta)
         raise ErrorDeDatos(f"NASA POWER no entregó la región: {error}") from error
     tabla = pd.DataFrame(columnas).sort_index()
     tabla = tabla.loc[:tabla.dropna(how="all").index.max()]
-    guardar_en_cache(tabla, ruta, float_format="%.5g")
+    CACHE.guardar(tabla, ruta, float_format="%.5g")
     return tabla
 
 

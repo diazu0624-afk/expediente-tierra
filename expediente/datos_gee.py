@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .datos import DIR_CACHE, ErrorDeDatos, caja, guardar_en_cache, leer_cache, vigente
+from .datos import CACHE, ErrorDeDatos, caja
 
 PROYECTO = os.environ.get("EXPEDIENTE_EE_PROYECTO", "project-7492083c-8d82-4592-953")
 LADO_CUBO = 10  # grados; el cubo siempre se baja de este tamaño y luego se recorta
@@ -115,7 +115,7 @@ def _ee():
 
 def _ruta(codigo: str, lat: float, lon: float) -> "os.PathLike":
     lat_min, lat_max, lon_min, lon_max = caja(lat, lon, LADO_CUBO)
-    return DIR_CACHE / f"gee_{codigo}_{lat_min:+.0f}_{lat_max:+.0f}_{lon_min:+.0f}_{lon_max:+.0f}.csv"
+    return CACHE.ruta(f"gee_{codigo}_{lat_min:+.0f}_{lat_max:+.0f}_{lon_min:+.0f}_{lon_max:+.0f}.csv")
 
 
 def _pixeles(ee, imagen, rejilla: Rejilla) -> np.ndarray:
@@ -214,21 +214,21 @@ def _con_cache(ruta, codigo: str, descargar) -> pd.DataFrame:
 
 def _leer_o_bajar(ruta, codigo: str, descargar) -> pd.DataFrame:
     """Lee el cubo del disco si está vigente; si no, lo baja. Sin Earth Engine, usa lo que haya."""
-    if vigente(ruta):
-        return leer_cache(ruta)
+    if CACHE.vigente(ruta):
+        return CACHE.leer(ruta)
     try:
         ee = _ee()
     except ErrorDeDatos:
         if ruta.exists():  # sin sesión de Earth Engine: se usa lo ya descargado
-            return leer_cache(ruta)
+            return CACHE.leer(ruta)
         raise
     try:
         tabla = descargar(ee)
     except Exception as error:
         if ruta.exists():
-            return leer_cache(ruta)
+            return CACHE.leer(ruta)
         raise ErrorDeDatos(f"Earth Engine no entregó {codigo}: {str(error)[:200]}") from error
-    guardar_en_cache(tabla, ruta, float_format="%.5g")
+    CACHE.guardar(tabla, ruta, float_format="%.5g")
     return tabla
 
 
@@ -303,14 +303,14 @@ def descargar_cubo_del_pais(pais: Pais, codigo: str) -> pd.DataFrame:
         return tabla[[c for c, esta in zip(rejilla.columnas, mascara) if esta and c in tabla.columns]]
 
     nombre = "".join(ch if ch.isalnum() else "_" for ch in pais.nombre)
-    return _con_cache(DIR_CACHE / f"pais_{codigo}_{nombre}_{celda:g}.csv.gz", codigo, descargar)
+    return _con_cache(CACHE.ruta(f"pais_{codigo}_{nombre}_{celda:g}.csv.gz"), codigo, descargar)
 
 
 def descargar_cubo_del_mundo(codigo: str) -> pd.DataFrame:
     """Serie mensual de una variable en cada celda del planeta (de 60° S a 84° N)."""
     celda = celda_para(codigo, *MUNDO)
     rejilla = rejilla_del_recuadro(*MUNDO, celda)
-    return _con_cache(DIR_CACHE / f"mundo_{codigo}_{celda:g}.csv.gz", codigo, lambda ee: _extraer(ee, codigo, rejilla))
+    return _con_cache(CACHE.ruta(f"mundo_{codigo}_{celda:g}.csv.gz"), codigo, lambda ee: _extraer(ee, codigo, rejilla))
 
 
 def _coordenadas(cubo: pd.DataFrame) -> np.ndarray:
