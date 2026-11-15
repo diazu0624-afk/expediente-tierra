@@ -285,6 +285,63 @@ def mapa(tabla: pd.DataFrame, unidad: str, lugar_lat: float | None = None, lugar
     return fig
 
 
+def laboratorio(clasica: float, corregida: float, prueba_t: float, con_tendencia: bool) -> go.Figure:
+    """Porcentaje de series que cada prueba declara con tendencia significativa."""
+    nombres = ["Mann-Kendall clásica", "Mann-Kendall con preblanqueo", "Prueba t con muestra efectiva"]
+    valores = [clasica, corregida, prueba_t]
+    fig = go.Figure()
+    fig.add_bar(x=valores, y=nombres, orientation="h", width=0.55,
+                marker=dict(color=[ROJO if not con_tendencia else AZUL, AZUL, AZUL], cornerradius=4),
+                text=[f"{v:.0f} %" for v in valores], textposition="outside", cliponaxis=False,
+                textfont=dict(color=TINTA, size=13, family=FUENTE_CIFRAS), hoverinfo="skip")
+    _base(fig, alto=230)
+    fig.update_layout(showlegend=False, margin_t=28)
+    if not con_tendencia:
+        fig.add_vline(x=100 * est.ALFA, line_color=TINTA, line_width=1.2, line_dash="dot",
+                      annotation_text="5 % esperado", annotation_position="top",
+                      annotation_font=dict(color=TINTA_2, size=11, family=FUENTE))
+    fig.update_xaxes(range=[0, max(max(valores) * 1.2, 12)], ticksuffix=" %",
+                     title_text="Series declaradas con tendencia significativa")
+    fig.update_yaxes(showgrid=False, autorange="reversed", ticks="",
+                     tickfont=dict(color=TINTA_2, family=FUENTE, size=12.5))
+    return fig
+
+
+def serie_simulada(t: np.ndarray, y: np.ndarray) -> go.Figure:
+    """Una serie del laboratorio con la recta que la prueba clásica toma por tendencia."""
+    fig = go.Figure()
+    fig.add_scatter(x=t, y=y, mode="lines", line=dict(color=EJE, width=1), name="Serie simulada (mensual)",
+                    hoverinfo="skip")
+    suave = pd.Series(y).rolling(12, center=True).mean()
+    fig.add_scatter(x=t, y=suave, mode="lines", line=dict(color=AZUL, width=2), name="Media móvil de 12 meses",
+                    hoverinfo="skip")
+    recta = np.polyval(np.polyfit(t, y, 1), t)
+    fig.add_scatter(x=t, y=recta, mode="lines", line=dict(color=TINTA, width=2), name="Recta ajustada",
+                    hoverinfo="skip")
+    _base(fig, alto=300)
+    fig.update_layout(legend_traceorder="normal")
+    fig.update_xaxes(title_text="Años")
+    fig.update_yaxes(title_text="Desviaciones estándar")
+    return fig
+
+
+def relacion(fechas: pd.Index, a: np.ndarray, b: np.ndarray, nombre_a: str, nombre_b: str, mensual: bool) -> go.Figure:
+    """Las anomalías estandarizadas de dos variables sobre un mismo eje."""
+    fig = go.Figure()
+    for valores, nombre, color in ((a, nombre_a, LUGAR_A), (b, nombre_b, LUGAR_B)):
+        serie = pd.Series(valores, index=fechas)
+        if mensual:
+            serie = serie.rolling(12, center=True, min_periods=6).mean()
+        fig.add_scatter(x=fechas, y=serie, mode="lines" if mensual else "lines+markers", name=nombre,
+                        line=dict(color=color, width=2), marker=dict(size=6),
+                        hovertemplate=nombre + ": %{y:+.2f} σ<extra></extra>")
+    _base(fig, alto=340)
+    fig.add_hline(y=0, line_color=EJE, line_width=1)
+    fig.update_layout(legend_traceorder="normal")
+    fig.update_yaxes(title_text="Anomalía estandarizada (desviaciones estándar)")
+    return fig
+
+
 def _para_comparar(r: Interrogatorio) -> tuple[pd.Index, pd.Series, np.ndarray]:
     """Fechas, serie suavizada y recta de tendencia, todo como anomalía."""
     if r.resolucion == "mensual":

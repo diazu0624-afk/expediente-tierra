@@ -326,6 +326,34 @@ def loess(x: np.ndarray, y: np.ndarray, fraccion: float = 0.5) -> np.ndarray:
         curva[i] = (swxx * swy - swx * swxy) / determinante if determinante > 1e-12 * sw * sw else swy / sw
     return curva
 
+@dataclass(frozen=True)
+class Correlacion:
+    r: float
+    p: float
+    n: int
+    n_efectivo: float
+
+
+def correlacion(x: np.ndarray, y: np.ndarray, t: np.ndarray | None = None) -> Correlacion:
+    """Correlación de Pearson entre dos series, sin sus tendencias y con tamaño de muestra efectivo.
+
+    Primero se le quita a cada serie su recta: dos variables que solo comparten una tendencia
+    de fondo no "varían juntas". El valor p descuenta la autocorrelación de las dos series
+    (Bretherton et al., 1999): n_efectivo = n (1 - r1x·r1y) / (1 + r1x·r1y).
+    """
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    t = np.arange(x.size, dtype=float) if t is None else np.asarray(t, dtype=float)
+    x = x - np.polyval(np.polyfit(t, x, 1), t)
+    y = y - np.polyval(np.polyfit(t, y, 1), t)
+    n = x.size
+    r = float(np.corrcoef(x, y)[0, 1])
+    pares = pares_consecutivos(t)
+    memoria = max(autocorrelacion_lag1(x, pares), 0.0) * max(autocorrelacion_lag1(y, pares), 0.0)
+    n_efectivo = float(np.clip(n * (1 - memoria) / (1 + memoria), 3, n))
+    estadistico = r * np.sqrt((n_efectivo - 2) / max(1 - r * r, 1e-12))
+    return Correlacion(r, float(2 * stats.t.sf(abs(estadistico), n_efectivo - 2)), n, n_efectivo)
+
+
 def benjamini_hochberg(p: np.ndarray) -> np.ndarray:
     """Valores p ajustados para controlar la tasa de descubrimientos falsos.
 

@@ -382,3 +382,41 @@ def test_el_informe_de_un_pais_no_lleva_coordenadas():
     r = caso.interrogar(_serie(0.05), POR_CODIGO["FLDAS_TEMP"])
     html = informe.informe_html(r, "México (promedio nacional de 802 celdas)", None, None)
     assert "promedio nacional" in html and "Latitud" not in html.split("Periodo analizado")[0].split("Sitio de estudio")[1]
+
+
+# ---------- diferenciador: laboratorio, prueba clásica y relación entre variables ----------
+
+def test_el_laboratorio_reproduce_que_la_prueba_clasica_inventa_tendencias():
+    from expediente import laboratorio
+    sim = laboratorio.simular(anios=30, phi=0.6, series=150, semilla=1)
+    assert sim.clasica > 20 and sim.corregida < 12 and sim.prueba_t < 12
+    assert sim.ejemplo is not None and sim.ejemplo.p_clasica < 0.05 <= sim.ejemplo.p_corregida
+    # Con una tendencia real marcada, la prueba corregida la detecta casi siempre.
+    assert laboratorio.simular(anios=30, phi=0.3, series=60, pendiente_por_decada=0.5, semilla=2).corregida > 85
+
+
+def test_la_exploracion_informa_el_valor_p_de_la_prueba_clasica():
+    tabla = caso.escanear(pd.DataFrame({"T2M": _serie(0.05), "PRECTOTCORR": _serie(0.0, semilla=4)}),
+                          (POR_CODIGO["T2M"], POR_CODIGO["PRECTOTCORR"]))
+    assert tabla["p_clasica"].notna().all() and tabla.set_index("codigo").loc["T2M", "p_clasica"] < 0.05
+
+
+def test_la_correlacion_no_se_deja_enganar_por_una_tendencia_compartida():
+    from expediente import estadistica as est
+    rng = np.random.default_rng(8)
+    t = np.arange(480) / 12
+    comun = rng.normal(size=480)
+    # Dos series independientes que solo comparten una tendencia: sin quitarla, r sería alta.
+    a, b = 0.3 * t + rng.normal(size=480), 0.3 * t + rng.normal(size=480)
+    assert abs(np.corrcoef(a, b)[0, 1]) > 0.8 and abs(est.correlacion(a, b, t).r) < 0.15
+    # Dos series que sí varían juntas.
+    juntas = est.correlacion(comun + 0.5 * rng.normal(size=480), comun + 0.5 * rng.normal(size=480), t)
+    assert juntas.r > 0.6 and juntas.p < 0.001 and juntas.n == 480
+
+
+def test_relacionar_usa_las_fechas_comunes_de_las_dos_variables():
+    a = caso.interrogar(_serie(0.05), POR_CODIGO["T2M"])
+    b = caso.interrogar(_serie(0.05).loc["2000":], POR_CODIGO["MODIS_AOD"])
+    rel = caso.relacionar(a, b)
+    assert rel.resolucion == "mensual" and len(rel.a) == len(rel.b) == rel.correlacion.n == len(b.anomalias)
+    assert rel.correlacion.r > 0.99  # es la misma serie

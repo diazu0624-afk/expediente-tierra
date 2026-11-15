@@ -13,8 +13,8 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as componentes
 
-from expediente import caso, datos, datos_gee, graficas, informe, region, sitio as sitios, veredicto
-from expediente.variables import CATALOGO, CATEGORIAS, METODOS, POR_CODIGO, REFERENCIAS, SOLO_MAR, Variable
+from expediente import caso, datos, datos_gee, graficas, informe, laboratorio, region, sitio as sitios, veredicto
+from expediente.variables import CATALOGO, CATEGORIAS, METODOS, PAREJAS, POR_CODIGO, REFERENCIAS, SOLO_MAR, Variable
 
 RAIZ = Path(__file__).parent
 st.set_page_config(page_title="Expediente Tierra", page_icon=str(RAIZ / "static" / "favicon.png"),
@@ -445,6 +445,8 @@ def pagina_inicio() -> None:
           f"de los casos con autocorrelación baja y en {VALIDACION['potencia_media']} con autocorrelación media.")
     st.caption(f"Simulación de Monte Carlo con {VALIDACION['series']} series por escenario. El código "
                "está en la carpeta validacion/ del repositorio.")
+    st.page_link(PAGINAS["laboratorio"], label="Repetir la simulación en vivo en el laboratorio",
+                 icon=":material/arrow_forward:")
 
     seccion(5, "Datos")
     satelite = sum(v.origen == "gee" for v in CATALOGO)
@@ -584,6 +586,20 @@ def paso_exploracion(exploracion: pd.DataFrame, preferidas: tuple[str, ...] = ()
         f"interanual de esa variable. **{firmes}** tienen una tendencia significativa en esta "
         f"primera revisión. Pasa el cursor sobre una barra para ver la definición de la variable."
     )
+    clasicas = int((validas["p_clasica"] < 0.05).sum())
+    with st.container(border=True):
+        a, b, c = st.columns(3)
+        cifra(a, "Variables analizadas", f"{len(validas)}", "", "con datos suficientes en este sitio")
+        cifra(b, "Con la prueba clásica", f"{clasicas}", "",
+              "parecerían tener tendencia: Mann-Kendall sobre los datos mensuales, sin corregir la "
+              "autocorrelación ni el número de comparaciones")
+        cifra(c, "Con este método", f"{firmes}", "",
+              "tienen tendencia significativa: autocorrelación corregida y valores p ajustados por "
+              "comparaciones múltiples")
+        if clasicas > firmes:
+            st.caption(f"{clasicas - firmes} de las {clasicas} tendencias que señalaría la prueba clásica no "
+                       f"sobreviven a las correcciones. En el laboratorio se puede comprobar con series sin "
+                       f"tendencia cuántas de esas señales son falsas.")
     plotly(graficas.exploracion(exploracion))
     st.caption("Junto a cada variable está su tamaño de muestra (n, en años con datos completos): una "
                "tendencia de 19 años no pesa lo mismo que una de 45. Al evaluar muchas variables a la vez "
@@ -873,6 +889,88 @@ def paso_resultado(r: caso.Interrogatorio, sitio: dict, hipotesis: str | None = 
     )
 
 
+def _fila_de_fuente(r: caso.Interrogatorio) -> str:
+    bajo, alto = r.ic_decada
+    return (f"| {r.variable.nombre} | {r.variable.fuente} | {caso.numero(r.pendiente_decada, signo=True)} "
+            f"{r.variable.unidad} | {caso.numero(bajo, signo=True)} a {caso.numero(alto, signo=True)} | "
+            f"{caso.NIVELES_CORTOS[r.nivel]} ({r.aprobadas}/{caso.N_PRUEBAS}) | {r.n} |")
+
+
+def contraste_entre_fuentes(sitio: dict, codigo: str, periodo: Periodo, meses: Meses, validas: list[str]) -> None:
+    """La misma magnitud medida por otra fuente, sobre el periodo que comparten."""
+    if codigo not in PAREJAS or PAREJAS[codigo][0] not in validas:
+        return
+    otra, independencia = PAREJAS[codigo]
+    comun = (max(periodo[0], POR_CODIGO[codigo].desde, POR_CODIGO[otra].desde), periodo[1])
+    try:
+        a = cargar_analisis(sitio["lat"], sitio["lon"], codigo, comun, meses)
+        b = cargar_analisis(sitio["lat"], sitio["lon"], otra, comun, meses)
+    except (caso.CasoImposible, KeyError):
+        return
+    firme_a, firme_b = a.nivel in ("solida", "fuerte"), b.nivel in ("solida", "fuerte")
+    if firme_a and firme_b and a.sube == b.sube:
+        conclusion = "Las dos fuentes coinciden: mismo signo y evidencia firme en ambas."
+    elif firme_a and firme_b:
+        conclusion = ("Las dos fuentes se contradicen: cada una da una tendencia firme de signo opuesto. El "
+                      "resultado depende de la fuente y debe tomarse con cautela.")
+    elif a.sube == b.sube and (firme_a or firme_b):
+        conclusion = "Las dos fuentes coinciden en el signo, pero solo una alcanza evidencia firme."
+    elif firme_a or firme_b:
+        conclusion = ("Las fuentes no coinciden: una da una tendencia firme y la otra apunta en sentido "
+                      "contrario sin evidencia suficiente. El resultado debe tomarse con cautela.")
+    else:
+        conclusion = "Ninguna de las dos fuentes muestra evidencia firme de una tendencia en el periodo que comparten."
+    st.markdown(f"**Otra fuente de la misma magnitud.** {conclusion}")
+    st.markdown("| Variable | Fuente | Cambio por década | IC del 95 % | Evidencia | n |\n|---|---|---|---|---|---|\n"
+                + _fila_de_fuente(a) + "\n" + _fila_de_fuente(b))
+    st.caption(f"Las dos series se analizaron sobre el periodo que comparten, de {comun[0]} a {comun[1]}, con las "
+               f"mismas cinco pruebas. {independencia}")
+
+
+def relacion_con_otra_variable(sitio: dict, codigo: str, periodo: Periodo, meses: Meses, validas: list[str]) -> None:
+    """Correlación entre la variable analizada y otra del mismo sitio."""
+    otras = [c for c in validas if c != codigo]
+    if not otras:
+        return
+    st.markdown("**Relación con otra variable.** ¿Hay otra variable de este sitio que varíe junto con esta?")
+    pedida = _parametro("con")
+    otra = st.selectbox("Variable con la que se relaciona", [""] + otras,
+                        index=otras.index(pedida) + 1 if pedida in otras else 0,
+                        format_func=lambda c: POR_CODIGO[c].nombre if c else "Elegir una variable",
+                        label_visibility="collapsed", key=f"relacion_{codigo}")
+    if not otra:
+        return
+    try:
+        a = cargar_analisis(sitio["lat"], sitio["lon"], codigo, periodo, meses)
+        b = cargar_analisis(sitio["lat"], sitio["lon"], otra, periodo, meses)
+        rel = caso.relacionar(a, b)
+    except (caso.CasoImposible, KeyError) as error:
+        st.warning(f"No se pueden relacionar estas dos variables. {error}")
+        return
+    c = rel.correlacion
+    fuerza = "débil" if abs(c.r) < 0.3 else "moderada" if abs(c.r) < 0.6 else "fuerte"
+    sentido = "varían en el mismo sentido" if c.r > 0 else "varían en sentido contrario"
+    if c.p < 0.05:
+        lectura = (f"La correlación es {fuerza} y significativa: cuando una se aparta de lo normal, la otra "
+                   f"tiende a hacerlo también ({sentido}).")
+    else:
+        lectura = "La correlación no es significativa: no hay evidencia de que varíen juntas."
+    dato = "meses" if rel.resolucion == "mensual" else "años"
+    uno, dos, tres = st.columns(3)
+    cifra(uno, "Correlación", f"{c.r:+.2f}", "r de Pearson, sin tendencias")
+    cifra(dos, "Valor p", caso.valor_p(c.p).replace("p = ", "").replace("p ", ""), "con tamaño de muestra efectivo")
+    cifra(tres, "Tamaño de muestra", f"{c.n}", f"{dato} en común; efectivo: {c.n_efectivo:.0f}")
+    st.markdown(lectura)
+    plotly(graficas.relacion(rel.fechas, rel.a, rel.b,
+                             a.variable.nombre, b.variable.nombre, rel.resolucion == "mensual"))
+    st.caption("A cada serie se le quitó su ciclo estacional y su tendencia lineal, y se dividió entre su "
+               "desviación estándar para ponerlas en la misma escala"
+               + (" (la curva es la media móvil de 12 meses)" if rel.resolucion == "mensual" else "")
+               + ". Sin quitar la tendencia, dos variables que solo comparten un cambio de fondo parecerían "
+                 "relacionadas. El valor p descuenta la autocorrelación de las dos series (Bretherton et al., "
+                 "1999). Una correlación no demuestra que una variable cause a la otra.")
+
+
 def metodo() -> None:
     with st.expander("Método y validación"):
         st.markdown(
@@ -915,6 +1013,11 @@ serie nacional o global es su promedio ponderado por área (coseno de la latitud
 se le aplican las mismas cinco pruebas. El tamaño de la celda se ajusta para no pasar de 6,000
 celdas: 0.25° a 1° en un país, 3° en el mundo (de 60° S a 84° N). Solo están disponibles las
 variables que llegan por Earth Engine.
+
+**Otra fuente y relación entre variables.** Cuando existe otra fuente de la misma magnitud
+(satélite y reanálisis, o dos sensores), las dos se analizan sobre el periodo que comparten y se
+informa si coinciden. La relación entre dos variables es la correlación de Pearson de sus
+anomalías sin tendencia; su valor p usa el tamaño de muestra efectivo de Bretherton et al. (1999).
 
 **Curva suavizada.** Regresión local LOESS (Cleveland, 1979) con la mitad de los datos más
 cercanos a cada punto. Describe la forma del cambio sin suponer una recta; no entra a las pruebas.
@@ -1006,6 +1109,11 @@ def pagina_analisis() -> None:
                       f"{lat_max:g}°, longitud {lon_min:g}° a {lon_max:g}°.")
     paso_resultado(r, sitio, hipotesis, mapa, region_txt, CONTRASTES.get((ejemplo, codigo)))
     contraste_con_literatura(ejemplo, codigo)
+    seccion(6, "Contraste con otras variables")
+    if alcance != "El punto":
+        st.caption("El contraste se hace con las series del punto de estudio, no con las de la región o la celda.")
+    contraste_entre_fuentes(punto, codigo, periodo, meses, validas)
+    relacion_con_otra_variable(punto, codigo, periodo, meses, validas)
     metodo()
 
 
@@ -1117,6 +1225,76 @@ def pagina_territorio() -> None:
     paso_resultado(r, {"nombre": f"{nombre} ({promedio} de {resumen['celdas']:,} celdas)", "lat": None, "lon": None},
                    mapa=mapa, numero=4,
                    region_txt=f"{nombre}: {resumen['celdas']:,} celdas de {celda:g}° con datos.")
+    metodo()
+
+
+# ------------------------------------------------------------------ página: laboratorio
+
+@st.cache_data(show_spinner=False)
+def cargar_simulacion(anios: int, phi: float, series: int, pendiente: float, semilla: int) -> laboratorio.Simulacion:
+    return laboratorio.simular(anios, phi, series, pendiente, semilla)
+
+
+TENDENCIAS_DE_LABORATORIO = {
+    "Ninguna: se miden los falsos positivos": 0.0,
+    "Modesta (0.2 desviaciones estándar por década): se mide la potencia": 0.2,
+    "Marcada (0.5 desviaciones estándar por década): se mide la potencia": 0.5,
+}
+
+
+def pagina_laboratorio() -> None:
+    encabezado("Laboratorio", "¿Cuántas tendencias inventa cada prueba?",
+               "Aquí se fabrican series que no tienen ninguna tendencia y se les aplican las pruebas. Todo lo "
+               "que una prueba «detecte» en ellas es un error.")
+    seccion(1, "Experimento")
+    st.markdown(
+        "Las series del clima tienen autocorrelación: un mes cálido suele ir seguido de otro mes cálido. Eso "
+        "produce rachas largas que a simple vista, y para una prueba que suponga datos independientes, parecen "
+        "tendencias. Elige las condiciones y compara cuántas series declara «con tendencia significativa» cada "
+        "prueba. Con α = 0.05, una prueba bien calibrada debe equivocarse en unas 5 de cada 100.")
+    a, b, c = st.columns(3)
+    phi = a.slider("Autocorrelación entre un mes y el siguiente", 0.0, 0.9, 0.6, step=0.1,
+                   help="0: cada mes es independiente del anterior. 0.9: cada mes se parece mucho al anterior. "
+                        "En los datos reales de esta herramienta va de 0.1 a 0.9 según la variable.")
+    anios = b.slider("Años de datos mensuales", 15, 45, 30, step=5)
+    series = c.select_slider("Series simuladas", [100, 200, 300, 500, 1000], value=300)
+    izq, der = st.columns([3, 1], vertical_alignment="bottom")
+    tendencia = izq.selectbox("Tendencia real que se añade a las series", list(TENDENCIAS_DE_LABORATORIO))
+    if der.button("Generar otras series", icon=":material/refresh:", width="stretch"):
+        st.session_state["semilla_laboratorio"] = st.session_state.get("semilla_laboratorio", 0) + 1
+    pendiente = TENDENCIAS_DE_LABORATORIO[tendencia]
+    with st.spinner(f"Simulando {series} series..."):
+        sim = cargar_simulacion(anios, phi, series, pendiente, st.session_state.get("semilla_laboratorio", 0))
+
+    seccion(2, "Resultado")
+    if pendiente == 0:
+        veces = sim.clasica / max(sim.corregida, 100 / series)
+        st.markdown(
+            f"Ninguna de las {series} series tiene tendencia. La prueba de Mann-Kendall clásica declaró una "
+            f"tendencia significativa en **{sim.clasica:.0f} %** de ellas; con el preblanqueo que usa esta "
+            f"herramienta, en **{sim.corregida:.0f} %**"
+            + (f", unas {veces:.0f} veces menos." if veces >= 1.5 else "."))
+    else:
+        st.markdown(
+            f"Las {series} series tienen una tendencia real. La prueba corregida la detectó en "
+            f"**{sim.corregida:.0f} %** de ellas y la clásica en **{sim.clasica:.0f} %**. La clásica detecta "
+            f"más, pero a costa de sus falsos positivos: no distingue una tendencia real de una racha.")
+    plotly(graficas.laboratorio(sim.clasica, sim.corregida, sim.prueba_t, pendiente > 0))
+    margen = 196 * (0.05 * 0.95 / series) ** 0.5
+    st.caption(f"Con {series} series, una prueba calibrada al 5 % daría entre {max(5 - margen, 0):.0f} % y "
+               f"{5 + margen:.0f} % por azar. La validación completa del método, con 1,500 a 2,000 series por "
+               f"escenario y las cinco pruebas juntas, está en la carpeta validacion/ del repositorio.")
+
+    if pendiente == 0 and sim.ejemplo is not None:
+        seccion(3, "Una serie que engaña a la prueba clásica")
+        st.markdown(
+            f"Esta serie salió del experimento: no tiene tendencia, solo rachas. La prueba clásica la declara "
+            f"significativa ({caso.valor_p(sim.ejemplo.p_clasica)}); con la corrección de la autocorrelación "
+            f"deja de serlo ({caso.valor_p(sim.ejemplo.p_corregida)}).")
+        plotly(graficas.serie_simulada(sim.ejemplo.t, sim.ejemplo.y))
+        st.caption("Con datos reales ocurre lo mismo. En «Análisis de un lugar», la exploración de variables "
+                   "muestra cuántas tendencias señalaría la prueba clásica en ese sitio y cuántas sobreviven a "
+                   "las correcciones.")
     metodo()
 
 
@@ -1245,5 +1423,6 @@ PAGINAS.update({
     "analisis": st.Page(pagina_analisis, title="Análisis de un lugar", url_path="analisis"),
     "territorio": st.Page(pagina_territorio, title="País o mundo", url_path="territorio"),
     "comparacion": st.Page(pagina_comparacion, title="Comparación de dos lugares", url_path="comparacion"),
+    "laboratorio": st.Page(pagina_laboratorio, title="Laboratorio", url_path="laboratorio"),
 })
 st.navigation(list(PAGINAS.values()), position="top").run()

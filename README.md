@@ -159,11 +159,12 @@ expediente-tierra/
 │   └── demo.html               Recorrido animado (lo genera expediente/demo.py)
 ├── expediente/                 Lógica de la aplicación (sin Streamlit)
 │   ├── __init__.py
-│   ├── variables.py            Catálogo de 46 variables y 35 referencias con DOI
+│   ├── variables.py            Catálogo de 46 variables y 37 referencias con DOI
 │   ├── datos.py                NASA POWER (punto y región), geocodificador y caché
 │   ├── datos_gee.py            Google Earth Engine: 12 variables; cubos de un recuadro, un país o el mundo
 │   ├── sitio.py                Todas las variables de un punto; regla tierra/mar
 │   ├── extremos.py             Índices anuales de extremos con datos diarios de POWER
+│   ├── laboratorio.py          Simulación en vivo de falsos positivos
 │   ├── estadistica.py          Motor estadístico: pruebas, estimadores, bootstrap
 │   ├── caso.py                 Exploración de variables y análisis de una serie
 │   ├── region.py               Mapa de tendencias por celda y promedio regional
@@ -173,7 +174,7 @@ expediente-tierra/
 │   └── demo.py                 Generador del recorrido animado
 ├── tests/
 │   ├── test_estadistica.py     25 pruebas del motor estadístico
-│   └── test_caso.py            34 pruebas: análisis, región, informe, temporadas, extremos y territorios
+│   └── test_caso.py            38 pruebas: análisis, región, informe, temporadas, extremos, territorios y laboratorio
 ├── validacion/                 Simulaciones de Monte Carlo y filtro de calidad de datos
 │   ├── calibracion.py          Falsos positivos y potencia de cada prueba
 │   ├── veredictos.py           Falsos positivos y potencia del resultado completo
@@ -397,6 +398,23 @@ llegan por Earth Engine:
 
 Un país baja en unos 3 segundos y el mundo en 10 a 30 la primera vez; después se leen de
 `cache_power/pais_*.csv.gz` y `cache_power/mundo_*.csv.gz`.
+
+### 6.2.4 Lo que distingue al método, a la vista
+
+- **Laboratorio** (`laboratorio.simular`, página «Laboratorio»): fabrica series mensuales sin
+  tendencia y con la autocorrelación que se elija, y cuenta cuántas declara significativas cada
+  prueba. Con autocorrelación de 0.6 y 30 años, la prueba de Mann-Kendall clásica marca cerca
+  de 35 %; la corregida, cerca de 5 %. También mide la potencia si se añade una tendencia real.
+- **Prueba clásica frente a este método, con datos reales**: `escanear` devuelve `p_clasica`
+  (Mann-Kendall sobre las anomalías mensuales, sin corregir) y la exploración muestra cuántas
+  variables señalaría la prueba clásica y cuántas sobreviven a las correcciones.
+- **Otra fuente de la misma magnitud** (`variables.PAREJAS`, `app.contraste_entre_fuentes`):
+  aerosoles, ozono, precipitación, temperatura del mar y vegetación tienen dos fuentes; las dos
+  se analizan sobre el periodo común y se informa si coinciden, con una nota sobre qué tan
+  independientes son.
+- **Relación entre dos variables** (`estadistica.correlacion`, `caso.relacionar`): correlación
+  de Pearson de las anomalías sin tendencia, con valor p de tamaño de muestra efectivo
+  (Bretherton et al., 1999).
 
 ### 6.3 Exploración de variables (`caso.escanear`)
 
@@ -659,7 +677,7 @@ Antes de entrar al catálogo, cada variable se evalúa en siete sitios
 
 ```bash
 .venv/bin/pip install pytest pymannkendall
-.venv/bin/python -m pytest                   # 59 pruebas
+.venv/bin/python -m pytest                   # 63 pruebas
 .venv/bin/python -m validacion.calibracion   # falsos positivos de cada prueba
 .venv/bin/python -m validacion.veredictos    # falsos positivos del resultado completo
 .venv/bin/python -m validacion.series_cortas # calibración con series anuales cortas

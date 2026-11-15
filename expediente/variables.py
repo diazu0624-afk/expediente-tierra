@@ -168,6 +168,15 @@ REFERENCIAS: dict[str, Referencia] = {
         "detection of trends: Statistical considerations and applications to environmental "
         "data. Journal of Geophysical Research: Atmospheres, 103(D14), 17149–17161.",
         _doi("10.1029/98JD00995")),
+    "cleveland1979": Referencia(
+        "Cleveland, W. S. (1979). Robust locally weighted regression and smoothing scatterplots. "
+        "Journal of the American Statistical Association, 74(368), 829–836.",
+        _doi("10.1080/01621459.1979.10481038")),
+    "bretherton1999": Referencia(
+        "Bretherton, C. S., Widmann, M., Dymnikov, V. P., Wallace, J. M., & Bladé, I. (1999). The "
+        "effective number of spatial degrees of freedom of a time-varying field. Journal of "
+        "Climate, 12(7), 1990–2009.",
+        _doi("10.1175/1520-0442(1999)012<1990:TENOSD>2.0.CO;2")),
     "benjamini1995": Referencia(
         "Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A "
         "practical and powerful approach to multiple testing. Journal of the Royal "
@@ -176,7 +185,7 @@ REFERENCIAS: dict[str, Referencia] = {
 }
 
 METODOS = ("mann1945", "sen1968", "zhang2000", "wang2001", "santer2000", "weatherhead1998",
-           "benjamini1995")
+           "benjamini1995", "cleveland1979", "bretherton1999", "zhang2011")
 
 MERRA2 = "MERRA-2 (reanálisis de la NASA), vía NASA POWER"
 SYN1DEG = "CERES SYN1deg (NASA), vía NASA POWER"
@@ -671,12 +680,18 @@ SOLO_TIERRA = frozenset({
 # del océano también "ven" ríos y lagos, pero ahí sus algoritmos no son válidos.
 SOLO_MAR = frozenset(v.codigo for v in CATALOGO if v.categoria == OCEANO)
 
-# Pares de variables que miden lo mismo con fuentes independientes. Si las dos coinciden en
-# el signo de la tendencia, el resultado no depende de un solo instrumento o modelo.
-PAREJAS = {
-    "MODIS_AOD": "AOD_55", "AOD_55": "MODIS_AOD",
-    "OMI_OZONO": "TO3", "TO3": "OMI_OZONO",
-    "GPM_LLUVIA": "PRECTOTCORR", "PRECTOTCORR": "GPM_LLUVIA",
-    "MAR_SST_MODIS": "MAR_SST", "MAR_SST": "MAR_SST_MODIS",
-    "MODIS_EVI": "MODIS_NDVI", "MODIS_NDVI": "MODIS_EVI",
-}
+# Pares de variables que miden la misma magnitud con otra fuente, y qué tan independientes son.
+# Si las dos coinciden, el resultado no depende de un solo instrumento, modelo o fórmula.
+_PAREJAS = (
+    ("MODIS_AOD", "AOD_55", "El producto de CERES asimila observaciones de MODIS, así que las dos fuentes no son del "
+                            "todo independientes."),
+    ("OMI_OZONO", "TO3", "MERRA-2 asimila mediciones de ozono de satélite, entre ellas las de OMI: las dos fuentes no "
+                         "son del todo independientes."),
+    ("GPM_LLUVIA", "PRECTOTCORR", "Observación de satélite frente a un reanálisis corregido con pluviómetros: fuentes "
+                                  "en buena parte independientes."),
+    ("MAR_SST_MODIS", "MAR_SST", "Sensores distintos (infrarrojo de MODIS frente a AVHRR con boyas y barcos): fuentes "
+                                 "independientes."),
+    ("MODIS_EVI", "MODIS_NDVI", "Mismo instrumento con otra fórmula: comprueba que el resultado no depende del índice "
+                                "elegido."),
+)
+PAREJAS: dict[str, tuple[str, str]] = {a: (b, nota) for a, b, nota in _PAREJAS} | {b: (a, nota) for a, b, nota in _PAREJAS}

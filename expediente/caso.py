@@ -413,6 +413,49 @@ def tendencia_por_mes(serie_mensual: pd.Series, variable: Variable) -> pd.DataFr
     return tabla
 
 
+def _p_clasica(serie: pd.Series, anual: np.ndarray, variable: Variable, meses: tuple[int, ...]) -> float:
+    """Valor p de la prueba de Mann-Kendall tal como suele aplicarse: sobre los datos mensuales sin
+    ciclo estacional, sin corregir la autocorrelación. Sirve solo de referencia."""
+    if variable.anual or len(meses) < 12 or _parte_repetida(serie) > MAX_REPETIDOS:
+        return float(est.mann_kendall(anual).p)
+    return float(est.mann_kendall(est.quitar_ciclo_estacional(serie)[0].to_numpy()).p)
+
+
+@dataclass(frozen=True)
+class Relacion:
+    """Cómo varían juntas dos variables de un mismo lugar."""
+
+    correlacion: est.Correlacion
+    resolucion: str  # "mensual" o "anual"
+    fechas: pd.Index
+    a: np.ndarray  # anomalías de la primera variable, sin tendencia y estandarizadas
+    b: np.ndarray
+
+
+def relacionar(a: Interrogatorio, b: Interrogatorio) -> Relacion:
+    """Correlación entre las anomalías de dos análisis, sobre las fechas que comparten.
+
+    Si las dos se analizaron con datos mensuales se usan sus anomalías mensuales; si alguna
+    es anual, los valores anuales de las dos.
+    """
+    if a.resolucion == b.resolucion == "mensual":
+        juntas = pd.concat([a.anomalias.rename("a"), b.anomalias.rename("b")], axis=1).dropna()
+        t = np.asarray(juntas.index.year + (juntas.index.month - 0.5) / 12, dtype=float)
+        resolucion = "mensual"
+    else:
+        juntas = pd.concat([a.anual.rename("a"), b.anual.rename("b")], axis=1).dropna()
+        t = juntas.index.to_numpy(dtype=float)
+        resolucion = "anual"
+    if len(juntas) < MIN_ANIOS:
+        raise CasoImposible("Las dos variables comparten muy pocos datos para relacionarlas.")
+    def estandar(x: np.ndarray) -> np.ndarray:
+        sin_tendencia = x - np.polyval(np.polyfit(t, x, 1), t)
+        return sin_tendencia / (sin_tendencia.std(ddof=1) or 1.0)
+
+    return Relacion(est.correlacion(juntas["a"].to_numpy(), juntas["b"].to_numpy(), t), resolucion,
+                    juntas.index, estandar(juntas["a"].to_numpy()), estandar(juntas["b"].to_numpy()))
+
+
 def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO,
              meses: tuple[int, ...] = TODO_EL_ANIO) -> pd.DataFrame:
     """Exploración de variables: tendencia de cada una, en una escala comparable.
@@ -426,7 +469,7 @@ def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO,
     for v in variables:
         fila = {"codigo": v.codigo, "nombre": v.nombre, "categoria": v.categoria,
                 "unidad": v.unidad, "anios": 0, "pendiente_decada": np.nan,
-                "estandarizada": np.nan, "p": np.nan, "nota": ""}
+                "estandarizada": np.nan, "p": np.nan, "p_clasica": np.nan, "nota": ""}
         if v.codigo in datos:
             anual = serie_anual(datos[v.codigo].loc[str(v.desde):].dropna(), meses, v.anual)
         else:
@@ -440,6 +483,7 @@ def escanear(datos: pd.DataFrame, variables: tuple[Variable, ...] = CATALOGO,
             fila["pendiente_decada"] = recta.pendiente * 10
             fila["estandarizada"] = recta.pendiente * 10 / ruido.std(ddof=1)
             fila["p"] = est.mann_kendall_sin_memoria(anios, valores).prueba.p
+            fila["p_clasica"] = _p_clasica(datos[v.codigo].loc[str(v.desde):].dropna(), valores, v, meses)
         filas.append(fila)
 
     tabla = pd.DataFrame(filas)
