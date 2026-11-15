@@ -221,11 +221,21 @@ def test_informe_html_completo_y_con_texto_externo_escapado():
 
 
 def test_recorrido_animado_generado_y_completo():
-    from expediente import demo
-    html = demo.RUTA.read_text(encoding="utf-8")
-    assert html.count('<section class="escena') == 11 and "__DATOS__" not in html and "const AUTO = true;" in html
-    datos = {"sitio": "X", "variables": 27, "exploracion": [], "pruebas": []}
+    from expediente import demo, idioma
+    for lengua, ruta in demo.RUTAS.items():
+        html = ruta.read_text(encoding="utf-8")
+        assert html.count('<section class="escena') == 15 and "const AUTO = true;" in html and f'<html lang="{lengua}">' in html
+        # No quedan marcadores sin sustituir: ni los datos ni los textos bilingües.
+        assert "__DATOS__" not in html and "⟦" not in html and "¦" not in html and "⟧" not in html
+    assert "Laboratorio de falsos positivos" in demo.RUTAS["es"].read_text(encoding="utf-8")
+    assert "False-positive laboratory" in demo.RUTAS["en"].read_text(encoding="utf-8")
+    datos = {"sitio": "X", "variables": 46}
     assert '"sitio": "X"' in demo.demo_html(datos) and "const AUTO = false;" in demo.demo_html(datos, reproducir_sola=False)
+    try:
+        idioma.fijar("en")
+        assert "Start an analysis" in demo.demo_html(datos) and "Empezar un análisis" not in demo.demo_html(datos)
+    finally:
+        idioma.fijar("es")
 
 
 # ---------- regla tierra/mar ----------

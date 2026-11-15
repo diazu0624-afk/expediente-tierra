@@ -68,14 +68,21 @@ Sin esa sesión la app sigue funcionando y avisa que los satélites no están di
 
 ### Recorrido animado y video
 
-`static/demo.html` es una animación de 55 segundos (once escenas de 5) que recorre la herramienta con los datos
-reales de Nueva Delhi. Aparece incrustada en la página de inicio y también sirve para grabar
-el video de presentación:
+`static/demo.html` (español) y `static/demo_en.html` (inglés) son una animación de 75 segundos
+(quince escenas de 5) que recorre la herramienta con datos reales: Nueva Delhi para el flujo
+principal, México y el mundo para los territorios. Aparece incrustada en la página de inicio,
+en el idioma de la sesión, y también sirve para grabar el video de presentación:
 
 1. Abre `static/demo.html?grabar=1` en el navegador a pantalla completa (sin controles).
 2. Graba la pantalla (en Mac: `Cmd + Shift + 5`) y recarga la página para que empiece.
 
-Para regenerarla tras cambiar datos o textos: `.venv/bin/python -m expediente.demo`. Sin
+Las quince escenas: portada, el problema, empezar un análisis, exploración de variables (con el
+conteo de la prueba clásica frente al método), distribución espacial, serie de tiempo, pruebas
+de significancia, resultado, meses del año, extremos, país o mundo, comparación de dos lugares,
+laboratorio, informe y cierre. Con `?escena=N` empieza en la escena N.
+
+Para regenerarla tras cambiar datos o textos: `.venv/bin/python -m expediente.demo` (escribe
+los dos idiomas; los textos de la plantilla van como `⟦español¦english⟧`). Sin
 `?grabar=1` tiene una barra de controles: anterior, pausa, siguiente, reiniciar y una barra
 por escena para saltar a cualquiera. Teclas: espacio (pausa) y flechas (cambiar de escena).
 La duración de cada escena es el atributo `data-dur` y el ritmo interno, la variable `--k`.
@@ -168,7 +175,8 @@ expediente-tierra/
 │   └── config.toml             Tema: colores, tipografías, barra de herramientas
 ├── static/
 │   ├── favicon.png             Ícono de la pestaña
-│   └── demo.html               Recorrido animado (lo genera expediente/demo.py)
+│   ├── demo.html               Recorrido animado en español (lo genera expediente/demo.py)
+│   └── demo_en.html            El mismo recorrido en inglés
 ├── expediente/                 Lógica de la aplicación (sin Streamlit)
 │   ├── __init__.py
 │   ├── variables.py            Catálogo de 46 variables y 37 referencias con DOI
@@ -778,7 +786,7 @@ Las referencias completas están en la página "Variables" de la app y en
 - **GRACE.** Su resolución real es de unos 300 km y tiene un hueco entre 2017 y 2018.
 - **Tendencias no lineales.** El resultado principal es una recta; la regresión en dos
   tramos solo advierte cuando no basta.
-- **Idioma.** Español e inglés. El recorrido animado del inicio está solo en español.
+- **Idioma.** Español e inglés, incluido el recorrido animado.
 - **Nombres internos.** El código conserva nombres de la primera versión (sección 4).
 - **Pruebas de interfaz.** Se hicieron a mano; no hay pruebas automáticas de `app.py`.
 

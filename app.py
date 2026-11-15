@@ -449,14 +449,15 @@ def pagina_inicio() -> None:
         equipo=T("Equipo C15H25N3O", "Team C15H25N3O"),
     )
 
-    recorrido = RAIZ / "static" / "demo.html"
+    recorrido = RAIZ / "static" / T("demo.html", "demo_en.html")
     if recorrido.exists():
         seccion(1, T("Recorrido de la herramienta", "Tour of the tool"))
-        st.caption(T("El flujo completo en menos de un minuto, con los datos reales de Nueva Delhi: de empezar un "
-                     "análisis a descargar el informe. Se puede pausar, retroceder, avanzar o saltar a cualquier escena.",
-                     "The whole workflow in under a minute, with the real data of New Delhi: from starting an "
-                     "analysis to downloading the report. It can be paused, rewound, advanced or jumped to any "
-                     "scene. The tour is in Spanish."))
+        st.caption(T("La herramienta en 75 segundos, con datos reales: de empezar un análisis a descargar el informe, "
+                     "con el análisis por meses, los extremos, los países y el laboratorio. Se puede pausar, "
+                     "retroceder, avanzar o saltar a cualquier escena.",
+                     "The tool in 75 seconds, with real data: from starting an analysis to downloading the report, "
+                     "including the analysis by month, the extremes, the countries and the laboratory. It can be "
+                     "paused, rewound, advanced or jumped to any scene."))
         # La misma animación se reproduce sola cuando se abre el archivo directamente (para grabarla).
         componentes.html(recorrido.read_text(encoding="utf-8").replace("const AUTO = true;", "const AUTO = false;"),
                          height=660)
