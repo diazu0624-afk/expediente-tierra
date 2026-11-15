@@ -11,3 +11,6 @@ cache_power/mundo_*
 !cache_power/mundo_GPM_LLUVIA_3.csv.gz
 !cache_power/mundo_MODIS_NDVI_3.csv.gz
 !cache_power/mundo_GRACE_AGUA_3.csv.gz
+
+# Mapas regionales de POWER: solo se versionan los que ya estaban; los demás bajan en 1 a 3 s.
+cache_power/region_*

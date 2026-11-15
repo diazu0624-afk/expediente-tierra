@@ -78,6 +78,9 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
                                    for f in datos.itertuples()])
     fig = go.Figure()
     grupos = _grupos()
+    orden = np.sort(datos["estandarizada"].abs().to_numpy())[::-1]
+    # Una barra que se sale de la escala lleva su cifra dentro, no a su lado (ver más abajo).
+    limite_de_texto = float(orden[1]) if len(orden) > 2 and orden[0] > 2.2 * orden[1] else np.inf
     for nombre, sube, significativa, color in grupos:
         g = datos[((datos["estandarizada"] > 0) == sube) & (datos["significativa"] == significativa)]
         detalle = [
@@ -92,13 +95,23 @@ def exploracion(tabla: pd.DataFrame) -> go.Figure:
         fig.add_bar(
             name=nombre, y=g["etiqueta"], x=g["estandarizada"], orientation="h", width=0.62,
             marker=dict(color=color, cornerradius=4),
-            text=[f"{x:+.2f}" for x in g["estandarizada"]] if significativa else None,
+            text=[f"{x:+.2f}" if abs(x) <= limite_de_texto else "" for x in g["estandarizada"]] if significativa else None,
             textposition="outside", textfont=dict(color=TINTA_2, size=11, family=FUENTE_CIFRAS), cliponaxis=False,
             customdata=np.column_stack([g["nombre"], detalle]) if len(g) else None,
             hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>" + T("Tendencia estandarizada", "Standardised trend")
                           + ": %{x:+.2f}<extra></extra>",
         )
-    tope = float(datos["estandarizada"].abs().max()) * 1.18 if len(datos) else 1.0
+    # Si una variable se sale por mucho (GRACE en Delhi: -11), el eje se ajusta a las demás y su
+    # barra se corta en el borde, con su valor real escrito dentro.
+    magnitudes = np.sort(datos["estandarizada"].abs().to_numpy())[::-1]
+    fuera_de_escala = len(magnitudes) > 2 and magnitudes[0] > 2.2 * magnitudes[1]
+    tope = float(magnitudes[1 if fuera_de_escala else 0]) * 1.18 if len(magnitudes) else 1.0
+    if fuera_de_escala:
+        mayor = datos.loc[datos["estandarizada"].abs().idxmax()]
+        fig.add_annotation(y=mayor["etiqueta"], x=np.sign(mayor["estandarizada"]) * tope * 0.985, showarrow=False,
+                           xanchor="right" if mayor["estandarizada"] > 0 else "left",
+                           text=f"{mayor['estandarizada']:+.2f} · " + T("fuera de escala", "off the scale"),
+                           font=dict(color="#ffffff", size=11, family=FUENTE_CIFRAS))
     _base(fig, alto=26 * len(datos) + 110)
     fig.update_layout(barmode="overlay", legend_traceorder="normal")
     fig.update_xaxes(

@@ -98,7 +98,7 @@ La aplicación tiene cinco capas. Cada capa solo conoce a las que están debajo 
 ```mermaid
 flowchart TD
     subgraph Interfaz
-        APP["app.py<br/>páginas, controles y caché de sesión"]
+        APP["app.py<br/>6 páginas, controles, caché e idioma"]
     end
     subgraph Presentación
         GRAF["graficas.py<br/>figuras Plotly"]
@@ -106,32 +106,38 @@ flowchart TD
         INFO["informe.py<br/>informe HTML con SVG"]
     end
     subgraph Análisis
-        CASO["caso.py<br/>exploración y las cinco pruebas"]
-        REG["region.py<br/>mapa por celda y promedio regional"]
+        CASO["caso.py<br/>exploración, cinco pruebas,<br/>temporadas y relación entre variables"]
+        REG["region.py<br/>mapa por celda y promedio de un área"]
+        LAB["laboratorio.py<br/>simulación de falsos positivos"]
     end
     subgraph Núcleo
         EST["estadistica.py<br/>pruebas y estimadores"]
-        VAR["variables.py<br/>catálogo y referencias"]
+        VAR["variables.py + variables_en.py<br/>catálogo y referencias"]
+        IDI["idioma.py<br/>textos en español e inglés"]
     end
     subgraph Datos
-        DAT["datos.py<br/>NASA POWER, geocodificador, caché"]
-        GEE["datos_gee.py<br/>Google Earth Engine"]
+        SIT["sitio.py<br/>todas las variables de un punto"]
+        DAT["datos.py<br/>NASA POWER mensual, geocodificador, caché"]
+        EXT["extremos.py<br/>NASA POWER diario, índices ETCCDI"]
+        GEE["datos_gee.py<br/>Earth Engine: recuadro, país, mundo"]
     end
 
-    APP --> GRAF & VERE & INFO & CASO & REG & DAT & GEE & VAR
+    APP --> GRAF & VERE & INFO & CASO & REG & LAB & SIT & GEE & VAR & IDI
     INFO --> VERE
     GRAF & VERE & INFO --> CASO
-    GRAF & INFO & VERE --> EST
+    GRAF & INFO & VERE & LAB --> EST
     GRAF & INFO --> VAR
     REG --> CASO & EST & VAR
-    CASO --> EST & VAR
-    GEE --> DAT
+    CASO --> EST & VAR & IDI
+    VAR --> IDI
+    SIT --> DAT & EXT & GEE & VAR
+    EXT & GEE --> DAT
 ```
 
 Reglas que el código respeta:
 
-- **`estadistica.py` y `variables.py` no importan nada del proyecto.** El motor estadístico
-  trabaja solo con arreglos de numpy y se puede probar aislado.
+- **`estadistica.py` no importa nada del proyecto.** El motor estadístico trabaja solo con
+  arreglos de numpy y se puede probar aislado. `variables.py` solo depende de `idioma.py`.
 - **Ningún módulo de `expediente/` importa Streamlit.** Toda la lógica se puede ejecutar y
   probar sin interfaz; `app.py` es el único archivo que dibuja.
 - **Los módulos de datos no conocen el análisis.** Devuelven tablas de pandas y nada más.
